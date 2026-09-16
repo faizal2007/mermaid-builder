@@ -27,8 +27,16 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from PyQt6.QtCore import QEventLoop, QTimer  # noqa: E402
-from PyQt6.QtWidgets import QApplication, QWidget  # noqa: E402
+from PyQt6.QtGui import QColor  # noqa: E402
+from PyQt6.QtWidgets import (  # noqa: E402
+    QApplication,
+    QColorDialog,
+    QComboBox,
+    QToolButton,
+    QWidget,
+)
 
+from diagram_maker import shapes, style  # noqa: E402
 from diagram_maker.document import DiagramDocument, sample  # noqa: E402
 from diagram_maker.generators import generate  # noqa: E402
 from diagram_maker.preview import WEBENGINE_ERROR  # noqa: E402
@@ -125,6 +133,111 @@ def main() -> int:
     # the taskbar draws the window's icon, and ignores the one inside the .exe
     check(not window.windowIcon().isNull(), "the window has no icon, so the taskbar is blank")
     check(bool(window.windowIcon().availableSizes()), "the icon file holds no images")
+
+    print("checking the shape outlines\n")
+    drawn = 0
+    for spec_key in SPEC_ORDER:
+        for section in SPECS[spec_key].sections:
+            for field in section.fields:
+                if not field.shape_icons:
+                    continue
+                for choice in field.choices:
+                    drawn += 1
+                    check(
+                        not shapes.icon(choice).isNull(),
+                        f"{spec_key}: the {field.name} choice {choice!r} has no outline",
+                    )
+    check(bool(drawn), "no dropdown offers shapes, so nothing above was checked")
+    check(shapes.icon("Not a shape").isNull(), "an unknown shape drew an outline anyway")
+
+    # the specs are not the widgets: check the dropdown the window really builds
+    nodes = window.tree.topLevelItem(1)
+    check(nodes is not None and nodes.childCount() > 0, "the sample flowchart has no nodes")
+    if nodes is not None and nodes.childCount() > 0:
+        window.tree.setCurrentItem(nodes.child(0))
+        application.processEvents()
+        combos = window.form_host.findChildren(QComboBox) if window.form_host else []
+        shape_combo = next((box for box in combos if box.findText("Stadium") >= 0), None)
+        check(shape_combo is not None, "a node form has no shape dropdown")
+        if shape_combo is not None:
+            for name in ("Rectangle", "Rhombus", "Trapezoid"):
+                row = shape_combo.findText(name)
+                check(row >= 0, f"{name} is missing from the shape dropdown")
+                check(
+                    row >= 0 and not shape_combo.itemIcon(row).isNull(),
+                    f"{name} carries no outline in the shape dropdown",
+                )
+
+    print("checking the style text and its colour swatches\n")
+    check(
+        style.read("fill:#f9f,stroke:#333") == {"fill": "#f9f", "stroke": "#333"},
+        "a style statement was not read back as its properties",
+    )
+    check(
+        style.update("fill:#f9f,stroke:#333", "fill", "#ff0000") == "fill:#ff0000,stroke:#333",
+        "writing one style property disturbed the others",
+    )
+    check(
+        style.update("fill:#f9f,stroke-width:4px", "fill", "#00ff00")
+        == "fill:#00ff00,stroke-width:4px",
+        "a style property with no swatch of its own was dropped",
+    )
+    check(
+        style.update("fill:#f9f,stroke:#333", "stroke", None) == "fill:#f9f",
+        "clearing a colour left the property behind",
+    )
+    check(
+        style.read(r"stroke-dasharray:9\,5,fill:#fff")
+        == {"stroke-dasharray": r"9\,5", "fill": "#fff"},
+        "an escaped comma was taken for a separator",
+    )
+
+    # the swatches the form builds are what gets clicked, so exercise one
+    nodes = window.tree.topLevelItem(1)
+    node = nodes.child(0) if nodes is not None and nodes.childCount() else None
+    if node is None:
+        failures.append("the sample flowchart has no first node to style")
+    else:
+        rows = window.document.rows("nodes")
+        original = rows[0].get("style", "")
+        rows[0]["style"] = "fill:#ff0000,stroke:#00ff00,stroke-width:4px"
+        # the form is rebuilt on a selection change, which is what re-reads it
+        window.tree.setCurrentItem(window.tree.topLevelItem(0))
+        window.tree.setCurrentItem(node)
+        application.processEvents()
+
+        swatches = {
+            button.text(): button
+            for button in (
+                window.form_host.findChildren(QToolButton) if window.form_host else []
+            )
+        }
+        check(
+            set(swatches) == {"Fill", "Stroke", "Color"},
+            f"the style row offers {sorted(swatches)}, not fill, stroke and color",
+        )
+        if set(swatches) == {"Fill", "Stroke", "Color"}:
+            check("#ff0000" in swatches["Fill"].toolTip(), "the fill swatch ignored the document")
+            check("#00ff00" in swatches["Stroke"].toolTip(), "the stroke swatch ignored it too")
+            check("unset" in swatches["Color"].toolTip(), "an unset colour does not look unset")
+
+            # stand in for the modal dialog, then click the swatch for real
+            blocking = QColorDialog.getColor
+            QColorDialog.getColor = staticmethod(  # type: ignore[method-assign]
+                lambda *args, **kwargs: QColor("#123456")
+            )
+            try:
+                swatches["Fill"].click()
+            finally:
+                QColorDialog.getColor = blocking  # type: ignore[method-assign]
+
+            check(
+                rows[0]["style"] == "fill:#123456,stroke:#00ff00,stroke-width:4px",
+                f"clicking the fill swatch wrote {rows[0]['style']!r}",
+            )
+            check("#123456" in swatches["Fill"].toolTip(), "the swatch kept the old colour")
+
+        rows[0]["style"] = original
 
     renders: list[tuple[bool, str]] = []
     window.preview.rendered.connect(lambda ok, message: renders.append((ok, message)))

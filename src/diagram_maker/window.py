@@ -12,10 +12,11 @@ import json
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QAction, QIcon, QKeySequence
+from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer
+from PyQt6.QtGui import QAction, QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QColorDialog,
     QComboBox,
     QDockWidget,
     QDoubleSpinBox,
@@ -35,14 +36,16 @@ from PyQt6.QtWidgets import (
     QToolBar,
     QTreeWidget,
     QTreeWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
+from . import shapes, style
 from .document import FILE_SUFFIX, DiagramDocument, sample
 from .generators import Result, generate
 from .preview import MERMAID_VERSION, PreviewPane, standalone_html
-from .specs import BOOL, CHOICE, FLOAT, INT, LINES, SPECS, SPEC_ORDER, Field
+from .specs import BOOL, CHOICE, COLOUR, FLOAT, INT, LINES, SPECS, SPEC_ORDER, Field
 
 APP_NAME = "Diagram Maker"
 
@@ -51,6 +54,9 @@ ICON_FILE = "icon.ico"
 
 #: how long to wait after the last keystroke before regenerating
 DEBOUNCE_MS = 250
+
+#: the colour swatches in the property form, in logical pixels
+SWATCH_SIZE = 14
 
 _ROLE_KIND = Qt.ItemDataRole.UserRole
 _ROLE_SECTION = Qt.ItemDataRole.UserRole + 1
@@ -77,6 +83,33 @@ def app_icon() -> QIcon:
     """
     path = icon_path()
     return QIcon(str(path)) if path.is_file() else QIcon()
+
+
+def swatch(colour: str | None) -> QIcon:
+    """A filled square of ``colour``, or a crossed out box when there is none.
+
+    Painted rather than styled: a stylesheet border would not follow the
+    palette, and the swatch has to read on a light and a dark theme alike.
+    """
+    pixels = SWATCH_SIZE * 2
+    pixmap = QPixmap(pixels, pixels)
+    pixmap.fill(Qt.GlobalColor.transparent)
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.scale(2.0, 2.0)
+    painter.setPen(QPen(QColor(128, 128, 128)))
+    chosen = QColor(colour or "")
+    painter.setBrush(chosen if chosen.isValid() else Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(0.5, 0.5, SWATCH_SIZE - 1.0, SWATCH_SIZE - 1.0), 2.0, 2.0)
+    if not chosen.isValid():
+        # nothing picked yet, which is worth seeing rather than guessing at
+        corner = SWATCH_SIZE - 4.0
+        painter.drawLine(QPointF(3.5, 3.5), QPointF(corner, corner))
+    painter.end()
+
+    pixmap.setDevicePixelRatio(2.0)
+    return QIcon(pixmap)
 
 
 class MainWindow(QMainWindow):
@@ -554,11 +587,20 @@ class MainWindow(QMainWindow):
             text = str(value or "")
             if text and text not in choices:
                 choices.insert(0, text)
-            editor.addItems(choices)
+            if field.shape_icons:
+                # "Stadium" and "Rhombus" mean little until they are drawn, so
+                # every entry carries the outline mermaid will produce
+                for choice in choices:
+                    editor.addItem(shapes.icon(choice), choice)
+            else:
+                editor.addItems(choices)
             if text:
                 editor.setCurrentText(text)
             editor.currentTextChanged.connect(store)
             return editor
+
+        if field.kind == COLOUR:
+            return self._colour_editor(field, value, store)
 
         if field.kind == BOOL:
             editor = QCheckBox()
@@ -586,6 +628,65 @@ class MainWindow(QMainWindow):
         editor.setPlaceholderText(field.placeholder)
         editor.textEdited.connect(store)
         return editor
+
+    def _colour_editor(self, field: Field, value, store) -> QWidget:
+        """One swatch per style property, opening a colour dialog.
+
+        The field's value stays the mermaid style text, so the generators and
+        the saved documents are untouched: picking a colour rewrites only the
+        property it belongs to.
+        """
+        holder = QWidget()
+        row = QHBoxLayout(holder)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+
+        current = style.read(str(value or ""))
+        buttons: dict[str, QToolButton] = {}
+
+        def refresh(name: str) -> None:
+            button = buttons[name]
+            chosen = current.get(name)
+            button.setIcon(swatch(chosen))
+            button.setToolTip(
+                f"{name}: {chosen or 'unset'} - click to pick, right-click to clear"
+            )
+
+        def set_property(name: str, colour: str | None) -> None:
+            if colour is None:
+                current.pop(name, None)
+            else:
+                current[name] = colour
+            refresh(name)
+            store(style.write(current))
+
+        def choose(name: str) -> None:
+            existing = QColor(current.get(name, ""))
+            picked = QColorDialog.getColor(
+                existing if existing.isValid() else QColor(Qt.GlobalColor.white),
+                self,
+                f"{field.label}: {name}",
+            )
+            if picked.isValid():
+                set_property(name, picked.name())
+
+        for name in field.colours:
+            button = QToolButton()
+            button.setText(name.capitalize())
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            button.clicked.connect(lambda _checked=False, n=name: choose(n))
+            # clearing has to be reachable, and a right click is where a swatch
+            # keeps it in every other colour picker
+            button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            button.customContextMenuRequested.connect(
+                lambda _point, n=name: set_property(n, None)
+            )
+            buttons[name] = button
+            refresh(name)
+            row.addWidget(button)
+
+        row.addStretch(1)
+        return holder
 
     def _commit(self, field: Field, value) -> None:
         target = self._current_target()

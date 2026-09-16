@@ -114,6 +114,8 @@ src/diagram_maker/
     document.py    DiagramDocument - plain-data document plus samples
     generators.py  document -> mermaid source, with per-row warnings
     preview.py     QtWebEngine preview page, and the browser fallback
+    shapes.py      outline icons, drawn for the shape dropdowns
+    style.py       the mermaid style statement, read and written as properties
     window.py      the main window, built from the specs
     icon.ico       the window and taskbar icon, drawn by packaging/make_icon.py
     __init__.py    main() and the headless CLI

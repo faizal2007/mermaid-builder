@@ -19,6 +19,7 @@ from typing import Any, Sequence
 TEXT = "text"
 LINES = "lines"
 CHOICE = "choice"
+COLOUR = "colour"
 INT = "int"
 FLOAT = "float"
 BOOL = "bool"
@@ -52,6 +53,12 @@ class Field:
     kind: str = TEXT
     default: Any = ""
     choices: tuple[str, ...] = ()
+    #: the choices name mermaid node shapes, so each is worth drawing; see
+    #: :mod:`~diagram_maker.shapes`
+    shape_icons: bool = False
+    #: for a COLOUR field, the style properties the pickers edit, named the way
+    #: mermaid names them; anything else in the text is left alone
+    colours: tuple[str, ...] = ()
     minimum: float = 0
     maximum: float = 100
     step: float = 1
@@ -203,9 +210,17 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
                             "Trapezoid",
                             "Asymmetric",
                         ),
+                        shape_icons=True,
                     ),
                     _f("container", "Subgraph", TEXT, "", placeholder="optional group name"),
-                    _f("style", "Style", TEXT, "", placeholder="fill:#f9f,stroke:#333"),
+                    _f(
+                        "style",
+                        "Style",
+                        COLOUR,
+                        "",
+                        colours=("fill", "stroke", "color"),
+                        tip="Click a swatch to pick a colour, right-click to clear it.",
+                    ),
                 ),
             ),
             ItemSpec(
@@ -448,7 +463,14 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
                 fields=(
                     _f("id", "Id", TEXT, "", placeholder="Checkout"),
                     _f("label", "Display name", TEXT, "", placeholder="Checkout"),
-                    _f("shape", "Shape", CHOICE, "Ellipse", choices=("Ellipse", "Rectangle")),
+                    _f(
+                        "shape",
+                        "Shape",
+                        CHOICE,
+                        "Ellipse",
+                        choices=("Ellipse", "Rectangle"),
+                        shape_icons=True,
+                    ),
                     _f("business", "Business use case", BOOL, False),
                     _f("stereotype", "Stereotype", TEXT, "", placeholder="Core"),
                     _f("boundary", "Inside boundary", TEXT, "", placeholder="boundary id"),
@@ -524,6 +546,7 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
                             "Cloud",
                             "Hexagon",
                         ),
+                        shape_icons=True,
                     ),
                 ),
             ),
