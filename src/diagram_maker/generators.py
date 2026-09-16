@@ -886,6 +886,154 @@ def _xychart(doc: DiagramDocument, warn: Callable[[str, int, str], None]) -> str
 
 
 # --------------------------------------------------------------------------- #
+# architecture
+# --------------------------------------------------------------------------- #
+
+#: arrow choice -> the mark before and after the dashes of an edge
+_ARCH_ARROWS: dict[str, tuple[str, str]] = _normalised({
+    "None  --": ("", ""),
+    "Into the target  -->": ("", ">"),
+    "Into the source  <--": ("<", ""),
+    "Both ways  <-->": ("<", ">"),
+})
+
+#: the sides mermaid will lay an edge out from
+_ARCH_SIDES = ("L", "R", "T", "B")
+
+#: an icon is a bare word inside parentheses, or "pack:name" from iconify
+_ARCH_ICON = re.compile(r"[^0-9A-Za-z_:-]")
+
+
+def _arch_side(value: Any, fallback: str) -> str:
+    text = clean(value).upper()
+    return text if text in _ARCH_SIDES else fallback
+
+
+def _arch_icon(value: Any) -> str:
+    return _ARCH_ICON.sub("", clean(value)) or "cloud"
+
+
+def _architecture(doc: DiagramDocument, warn: Callable[[str, int, str], None]) -> str:
+    out = ["architecture-beta"]
+    declared: set[str] = set()
+    groups: set[str] = set()
+    #: the services that really are in a group, which is what {group} needs
+    grouped: set[str] = set()
+
+    def inside(section_key: str, parent: Any, index: int, name: str) -> str:
+        """The ``in <group>`` part of a declaration, or nothing."""
+        asked = clean(parent)
+        if not asked:
+            return ""
+        holder = ident(asked, "")
+        if holder in groups:
+            if section_key != "groups":
+                grouped.add(name)
+            return f" in {holder}"
+        # mermaid wants the parent declared before the child, so a group that
+        # comes later cannot be used here; the element is better off at the top
+        # level than missing from the diagram
+        warn(
+            section_key,
+            index,
+            f"{name} left at the top level, {asked!r} is not a group declared above",
+        )
+        return ""
+
+    for section_key, keyword, parent_field in (
+        ("groups", "group", "parent"),
+        ("services", "service", "group"),
+    ):
+        for index, row in enumerate(doc.rows(section_key)):
+            raw = clean(row.get("id"))
+            if not raw:
+                warn(section_key, index, "skipped, no id")
+                continue
+            name = ident(raw, f"n{index + 1}")
+            if name in declared:
+                warn(section_key, index, f"skipped, duplicate id '{name}'")
+                continue
+            declared.add(name)
+
+            title = clean(row.get("title")) or raw
+            if "[" in title or "]" in title:
+                # the title goes inside brackets, so a bracket in it would end
+                # the label early and take the parse with it
+                warn(section_key, index, "square brackets removed from the title")
+                title = title.replace("[", "").replace("]", "")
+            out.append(
+                f"    {keyword} {name}({_arch_icon(row.get('icon'))})[{title}]"
+                f"{inside(section_key, row.get(parent_field), index, name)}"
+            )
+            if keyword == "group":
+                groups.add(name)
+
+    for index, row in enumerate(doc.rows("junctions")):
+        raw = clean(row.get("id"))
+        if not raw:
+            warn("junctions", index, "skipped, no id")
+            continue
+        name = ident(raw, f"j{index + 1}")
+        if name in declared:
+            warn("junctions", index, f"skipped, duplicate id '{name}'")
+            continue
+        declared.add(name)
+        out.append(
+            f"    junction {name}{inside('junctions', row.get('group'), index, name)}"
+        )
+
+    for index, row in enumerate(doc.rows("edges")):
+        source = ident(row.get("source"), "")
+        target = ident(row.get("target"), "")
+        if not source or not target:
+            warn("edges", index, "skipped, both ends must be given")
+            continue
+        if source not in declared or target not in declared:
+            warn("edges", index, "skipped, both ends must be declared above")
+            continue
+        if source in groups or target in groups:
+            # mermaid refuses an edge that names a group; {group} below is how a
+            # line is drawn against one
+            warn("edges", index, "skipped, a group cannot be an end of a connection")
+            continue
+
+        def whole_group(name: str, asked: Any) -> str:
+            """The ``{group}`` marker, when the edge is asked to meet the group."""
+            if not asked:
+                return ""
+            if name in grouped:
+                return "{group}"
+            warn("edges", index, f"{name} is not in a group, so the edge meets it directly")
+            return ""
+
+        from_side = _arch_side(row.get("source_side"), "R")
+        to_side = _arch_side(row.get("target_side"), "L")
+        left, right = _ARCH_ARROWS.get(clean(row.get("arrow")), ("", ""))
+        # the end on the left is named before its side and the one on the right
+        # after it, and {group} sits against the id rather than the side
+        out.append(
+            f"    {source}{whole_group(source, row.get('source_group'))}:{from_side}"
+            f" {left}--{right} "
+            f"{to_side}:{target}{whole_group(target, row.get('target_group'))}"
+        )
+
+    for index, row in enumerate(doc.rows("aligns")):
+        axis = clean(row.get("axis")).lower()
+        if axis not in ("row", "column"):
+            axis = "row"
+        asked = clean(row.get("members")).replace(",", " ").split()
+        members = [name for name in (ident(part, "") for part in asked) if name in declared]
+        if len(members) < 2:
+            # mermaid refuses an align of fewer than two, and would take the
+            # whole diagram down with it
+            warn("aligns", index, f"skipped, {len(members)} declared members, need two")
+            continue
+        out.append(f"    align {axis} {' '.join(members)}")
+
+    return "\n".join(out)
+
+
+# --------------------------------------------------------------------------- #
 # dispatch
 # --------------------------------------------------------------------------- #
 
@@ -901,6 +1049,7 @@ _GENERATORS: dict[str, Callable[[DiagramDocument, Callable[[str, int, str], None
     "pie": _pie,
     "quadrant": _quadrant,
     "xychart": _xychart,
+    "architecture": _architecture,
 }
 
 

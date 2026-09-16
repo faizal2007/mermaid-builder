@@ -97,6 +97,17 @@ def added(kind: str, group: str, **fields: Any) -> DiagramDocument:
     return doc
 
 
+def fielded(kind: str, group: str, index: int, fields: dict[str, Any]) -> DiagramDocument:
+    """Like :func:`edited`, for a field named after one of its parameters.
+
+    An architecture service has a ``group`` field, which cannot be passed as a
+    keyword to :func:`edited` because that is what its own argument is called.
+    """
+    doc = sample(kind)
+    doc.sections[group][index].update(fields)
+    return doc
+
+
 #: (case name, document builder)
 CASES: list[tuple[str, Callable[[], DiagramDocument]]] = [
     # -- flowchart ---------------------------------------------------------- #
@@ -191,6 +202,42 @@ CASES: list[tuple[str, Callable[[], DiagramDocument]]] = [
                           categories="a, b, c")),
     ("xychart: comma inside a value list is fine",
      lambda: edited("xychart", "series", 0, values="1, 2, 3, 4, 5, 6")),
+
+    # -- architecture ------------------------------------------------------- #
+    ("architecture: brackets in a title",
+     lambda: edited("architecture", "services", 0, title="Laptop [work]")),
+    ("architecture: quotes and colons in a title",
+     lambda: edited("architecture", "services", 0, title='Ops: "night shift"')),
+    ("architecture: hostile service id",
+     lambda: edited("architecture", "services", 0, id="my laptop-1!")),
+    ("architecture: icon pack name",
+     lambda: edited("architecture", "services", 0, icon="logos:aws-lambda")),
+    ("architecture: an unknown icon",
+     lambda: edited("architecture", "services", 0, icon="not-an-icon")),
+    ("architecture: service in an undeclared group",
+     lambda: fielded("architecture", "services", 0, {"group": "nowhere"})),
+    ("architecture: nested group whose parent comes later",
+     lambda: edited("architecture", "groups", 0, parent="data")),
+    ("architecture: connection to an undeclared service",
+     lambda: edited("architecture", "edges", 0, target="ghost")),
+    ("architecture: connection with no ends",
+     lambda: edited("architecture", "edges", 0, source="", target="")),
+    ("architecture: a group named as an end",
+     lambda: edited("architecture", "edges", 0, source="api")),
+    ("architecture: every side in turn",
+     lambda: edited("architecture", "edges", 0, source_side="T", target_side="B")),
+    ("architecture: the group marker on a service in a group",
+     lambda: edited("architecture", "edges", 2, source_group=True, target_group=True)),
+    ("architecture: the group marker on a service outside one",
+     lambda: edited("architecture", "edges", 0, source_group=True)),
+    ("architecture: alignment of one member",
+     lambda: edited("architecture", "aligns", 0, members="db")),
+    ("architecture: alignment naming unknown members",
+     lambda: edited("architecture", "aligns", 0, members="db ghost")),
+    ("architecture: duplicate service id",
+     lambda: added("architecture", "services", id="db", title="Twice", icon="server")),
+    ("architecture: junction with no group",
+     lambda: fielded("architecture", "junctions", 0, {"group": ""})),
 ]
 
 

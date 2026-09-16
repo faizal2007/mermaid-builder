@@ -594,6 +594,37 @@ def _xychart() -> DiagramDocument:
     return doc
 
 
+def _architecture() -> DiagramDocument:
+    doc = DiagramDocument.blank("architecture")
+    doc.options["title"] = "Order platform"
+    doc.sections["groups"] = _rows(
+        ("id", "api", "title", "Public API", "icon", "cloud"),
+        ("id", "data", "title", "Data", "icon", "database"),
+    )
+    doc.sections["services"] = _rows(
+        ("id", "laptop", "title", "Laptop", "icon", "internet"),
+        ("id", "gateway", "title", "Gateway", "icon", "server", "group", "api"),
+        ("id", "orders", "title", "Orders", "icon", "server", "group", "api"),
+        ("id", "db", "title", "Orders DB", "icon", "database", "group", "data"),
+        ("id", "cache", "title", "Cache", "icon", "disk", "group", "data"),
+        ("id", "warehouse", "title", "Warehouse", "icon", "disk"),
+    )
+    doc.sections["junctions"] = _rows(("id", "hub", "group", "data"))
+    doc.sections["edges"] = _rows(
+        ("source", "laptop", "arrow", "Into the target  -->", "target", "gateway"),
+        ("source", "gateway", "arrow", "Into the target  -->", "target", "orders"),
+        # three sources leave their right side into the junction's left, which is
+        # the pairing mermaid stacks - so they are aligned, or two would land on
+        # top of each other
+        ("source", "orders", "target", "hub"),
+        ("source", "db", "target", "hub"),
+        ("source", "cache", "target", "hub"),
+        ("source", "hub", "arrow", "Into the target  -->", "target", "warehouse"),
+    )
+    doc.sections["aligns"] = _rows(("axis", "column", "members", "orders db cache"))
+    return doc
+
+
 _SAMPLES = {
     "flowchart": _flowchart,
     "sequence": _sequence,
@@ -606,6 +637,7 @@ _SAMPLES = {
     "pie": _pie,
     "quadrant": _quadrant,
     "xychart": _xychart,
+    "architecture": _architecture,
 }
 
 

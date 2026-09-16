@@ -177,6 +177,20 @@ _ARROW_STYLES = (
     "Bidirectional  <-->",
 )
 
+#: the sides of a box an architecture edge can leave or arrive at
+_SIDES = ("L", "R", "T", "B")
+
+#: architecture edges carry an arrowhead on either side, or neither
+_ARCH_ARROWS = (
+    "None  --",
+    "Into the target  -->",
+    "Into the source  <--",
+    "Both ways  <-->",
+)
+
+#: the icons mermaid draws itself; iconify packs can be named "pack:icon" too
+_ARCH_ICONS = ("cloud", "database", "disk", "internet", "server")
+
 
 # --------------------------------------------------------------------------- #
 # the registry
@@ -730,6 +744,97 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
                     _f("name", "Name", TEXT, "", placeholder="optional"),
                     _f("kind", "Kind", CHOICE, "bar", choices=("bar", "line")),
                     _f("values", "Values", TEXT, "", placeholder="10, 20, 30"),
+                ),
+            ),
+        ),
+    ),
+    # --------------------------------------------------------- architecture
+    DiagramSpec(
+        key="architecture",
+        name="Architecture",
+        blurb="Services grouped into systems, wired port to port.",
+        options=(),
+        sections=(
+            ItemSpec(
+                key="groups",
+                label="Groups",
+                singular="Group",
+                text_field="title",
+                id_field="id",
+                summary=("id", "title"),
+                tip="Groups hold services. Ids must be declared before they are used.",
+                fields=(
+                    _f("id", "Id", TEXT, "", placeholder="api"),
+                    _f("title", "Title", TEXT, "", placeholder="Public API"),
+                    _f("icon", "Icon", CHOICE, _ARCH_ICONS[0], choices=_ARCH_ICONS),
+                    _f("parent", "Inside group", TEXT, "", placeholder="optional group id"),
+                ),
+            ),
+            ItemSpec(
+                key="services",
+                label="Services",
+                singular="Service",
+                text_field="title",
+                id_field="id",
+                summary=("id", "title"),
+                tip="A service may sit in a group, or stand on its own.",
+                fields=(
+                    _f("id", "Id", TEXT, "", placeholder="db"),
+                    _f("title", "Title", TEXT, "", placeholder="Orders DB"),
+                    _f("icon", "Icon", CHOICE, _ARCH_ICONS[1], choices=_ARCH_ICONS),
+                    _f("group", "Inside group", TEXT, "", placeholder="optional group id"),
+                ),
+            ),
+            ItemSpec(
+                key="junctions",
+                label="Junctions",
+                singular="Junction",
+                text_field="id",
+                id_field="id",
+                summary=("id",),
+                tip="A junction splits one edge into several without drawing a box.",
+                fields=(
+                    _f("id", "Id", TEXT, "", placeholder="hub"),
+                    _f("group", "Inside group", TEXT, "", placeholder="optional group id"),
+                ),
+            ),
+            ItemSpec(
+                key="edges",
+                label="Connections",
+                singular="Connection",
+                summary=("source", "target"),
+                tip="Sides are the edge of the box the line leaves or arrives at.",
+                fields=(
+                    _f("source", "From", TEXT, "", placeholder="db"),
+                    _f("source_side", "From side", CHOICE, "R", choices=_SIDES),
+                    _f("arrow", "Arrow", CHOICE, _ARCH_ARROWS[0], choices=_ARCH_ARROWS),
+                    _f("target_side", "To side", CHOICE, "L", choices=_SIDES),
+                    _f("target", "To", TEXT, "", placeholder="server"),
+                    _f(
+                        "source_group",
+                        "From parent group",
+                        BOOL,
+                        False,
+                        tip="Leave from the group the service is in, not the service.",
+                    ),
+                    _f(
+                        "target_group",
+                        "Into parent group",
+                        BOOL,
+                        False,
+                        tip="Arrive at the group the service is in, not the service.",
+                    ),
+                ),
+            ),
+            ItemSpec(
+                key="aligns",
+                label="Alignments",
+                singular="Alignment",
+                summary=("axis", "members"),
+                tip="Lines up services that share a port, when the layout stacks them.",
+                fields=(
+                    _f("axis", "Axis", CHOICE, "row", choices=("row", "column")),
+                    _f("members", "Members", TEXT, "", placeholder="db1 db2 db3"),
                 ),
             ),
         ),

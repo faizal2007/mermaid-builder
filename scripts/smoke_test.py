@@ -60,6 +60,7 @@ KEYWORDS = {
     "pie": "pie",
     "quadrant": "quadrantChart",
     "xychart": "xychart-beta",
+    "architecture": "architecture-beta",
 }
 
 failures: list[str] = []
@@ -385,16 +386,26 @@ def main() -> int:
         entities[column.index]["attributes"] = original
 
     sections = [(key, section) for key in SPEC_ORDER for section in SPECS[key].sections]
-    check(
-        all(section.text_field for _, section in sections),
-        "some section cannot be found by clicking the text it draws",
-    )
-    wrong = [
+    # a section that draws text has to say which field it comes from.  The ones
+    # that draw none at all - an architecture connection is a bare line, an
+    # alignment draws nothing - are the exceptions
+    wordless = {("architecture", "edges"), ("architecture", "aligns")}
+    missing = [
         f"{key}.{section.key}"
         for key, section in sections
-        if section.text_field not in [f.name for f in section.fields]
-        or (section.id_field and section.id_field not in [f.name for f in section.fields])
+        if not section.text_field and (key, section.key) not in wordless
     ]
+    check(not missing, f"these sections draw text but do not say where from: {missing}")
+    # every field a section names - for the click, and for the lines inside a
+    # box - has to be one of its own fields
+    wrong: list[str] = []
+    for key, section in sections:
+        names = [field.name for field in section.fields]
+        declared = [section.text_field, section.id_field]
+        declared.extend(field for _, field in section.line_fields)
+        for named in declared:
+            if named and named not in names:
+                wrong.append(f"{key}.{section.key} names {named!r}")
     check(not wrong, f"these sections name fields they do not have: {wrong}")
 
     renders: list[tuple[bool, str]] = []

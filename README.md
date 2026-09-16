@@ -5,7 +5,7 @@ A desktop tool for building diagrams visually — like Visio, but every diagram 
 generates the mermaid source, renders it live, and exports it as `.mmd`, `.html` or
 `.svg`.
 
-Eleven diagram types, all rendered by Mermaid 12.
+Twelve diagram types, all rendered by Mermaid 12.
 
 ## Requirements
 
@@ -46,9 +46,16 @@ uv run diagram-maker
 | Pie chart | `pie` | Slices with values |
 | Quadrant chart | `quadrant` | Points on two axes, four labelled quadrants |
 | XY chart | `xychart` | Bar and line series over categories |
+| Architecture | `architecture` | Services inside groups, wired port to port, with junctions |
 
 Every type shares the same options: a title, a mermaid theme and a
 `classic` / `neo` / `handDrawn` look.
+
+Two of them have their own ideas about text. An architecture diagram has no title
+of its own, so mermaid ignores the one the title option writes into the source
+and nothing appears above the picture. And an entity column is drawn as separate
+cells, so clicking one in the preview edits that cell rather than the whole
+column.
 
 ## Using it
 
