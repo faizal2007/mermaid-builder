@@ -32,6 +32,10 @@
 #define AppName "Diagram Maker"
 #define AppPublisher "Faizal Sadri"
 #define AppExeName "Diagram Maker.exe"
+; must match APP_ID in src/diagram_maker/__init__.py, which sets the same ID on
+; the running process; without a matching pair Windows drops the app icon from
+; the taskbar button and falls back to the host executable's
+#define AppUserModelId "FaizalSadri.DiagramMaker"
 
 [Setup]
 ; the AppId identifies the application across versions - never change it, or
@@ -74,8 +78,8 @@ Name: "association"; Description: "Open .diagram.json documents with {#AppName}"
 Source: "{#BundleDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Comment: "Build diagrams visually and export them as mermaid"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
+Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Comment: "Build diagrams visually and export them as mermaid"; AppUserModelID: "{#AppUserModelId}"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon; AppUserModelID: "{#AppUserModelId}"
 
 [Registry]
 ; HKA is HKCU for a per-user install and HKLM when the user elevated

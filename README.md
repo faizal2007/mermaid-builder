@@ -214,3 +214,8 @@ signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "dist\Diag
   rasterised per size. Run it with `--preview build/icon-preview.png` to look at
   the result before shipping it. The window loads that file at run time, which
   is what the taskbar draws, and the build embeds the same file in the `.exe`.
+- The window icon alone is not enough on Windows: the taskbar takes a button's
+  identity from the process's AppUserModelID, and an unset one is inherited from
+  the executable, so a run from source would show Python's icon. `main()` claims
+  `APP_ID` before anything else, and the installer writes the same string onto
+  the shortcuts it creates. Keep the two in step.

@@ -22,6 +22,7 @@ from .generators import Result, generate
 from .specs import SPECS, SPEC_ORDER
 
 __all__ = [
+    "APP_ID",
     "FILE_SUFFIX",
     "DiagramDocument",
     "Result",
@@ -33,6 +34,10 @@ __all__ = [
 ]
 
 __version__ = "0.1.0"
+
+#: the app's taskbar identity on Windows, kept in step by hand with the
+#: AppUserModelId define in packaging\\diagram-maker.iss
+APP_ID = "FaizalSadri.DiagramMaker"
 
 _USAGE = f"""\
 usage: diagram-maker [options] [FILE]
@@ -92,8 +97,34 @@ def _run_headless(argv: list[str]) -> int | None:
     return None
 
 
+def _claim_taskbar_identity() -> None:
+    """Claim a taskbar identity of this app's own, on Windows.
+
+    Windows groups taskbar buttons - and picks the icon to draw on them - by
+    "AppUserModelID".  Left unset, the ID is inherited from the executable, so
+    a run from source shares python.exe's button and gets Python's icon in
+    place of the one the window carries.  The installer stamps the same string
+    on the shortcuts it creates, which is what keeps the icon right once the
+    app is pinned.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
+    except (AttributeError, OSError):
+        # a nicety, not a requirement: without it the taskbar falls back to
+        # whatever the host process advertises
+        pass
+
+
 def main() -> None:
     """Start the application."""
+    # before anything is imported or shown, so no window can be created while
+    # the process is still advertising the interpreter's identity
+    _claim_taskbar_identity()
+
     argv = list(sys.argv[1:])
     if any(argument in {"-h", "--help"} for argument in argv):
         print(_USAGE)
