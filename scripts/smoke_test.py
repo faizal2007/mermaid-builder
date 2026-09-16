@@ -37,7 +37,7 @@ from PyQt6.QtWidgets import (  # noqa: E402
 )
 
 from diagram_maker import shapes, style  # noqa: E402
-from diagram_maker.document import DiagramDocument, sample  # noqa: E402
+from diagram_maker.document import DiagramDocument, TextTarget, sample  # noqa: E402
 from diagram_maker.generators import generate  # noqa: E402
 from diagram_maker.preview import WEBENGINE_ERROR  # noqa: E402
 from diagram_maker.specs import SPECS, SPEC_ORDER  # noqa: E402
@@ -242,10 +242,14 @@ def main() -> int:
     print("checking that a click in the diagram finds the element it drew\n")
     flowchart = sample("flowchart")
     found = flowchart.find_text("diagram-0-flowchart-Ship-0", "Ship order")
-    check(found is not None and found[0] == "nodes", f"a node id did not resolve: {found}")
+    check(found is not None and found.section == "nodes", f"a node id did not resolve: {found}")
     check(
-        found is not None and flowchart.rows("nodes")[found[1]]["id"] == "Ship",
+        found is not None and flowchart.rows("nodes")[found.index]["id"] == "Ship",
         f"a node id resolved to the wrong row: {found}",
+    )
+    check(
+        found is not None and found.line is None,
+        f"a node label resolved to a line of a field: {found}",
     )
     check(
         flowchart.find_text("diagram-0-flowchart-2-0", "") is None,
@@ -254,22 +258,131 @@ def main() -> int:
     # the id wins: mermaid may have reformatted the text, but not the id
     mixed = flowchart.find_text("diagram-0-flowchart-Ship-0", "Order received")
     check(
-        mixed is not None and flowchart.rows("nodes")[mixed[1]]["id"] == "Ship",
+        mixed is not None and flowchart.rows("nodes")[mixed.index]["id"] == "Ship",
         f"rendered text overrode the id it sat in: {mixed}",
     )
     # edges are drawn without an id of their own, so the text has to find them
     edge = flowchart.find_text("", "yes")
-    check(edge is not None and edge[0] == "edges", f"an edge label did not resolve: {edge}")
+    check(edge is not None and edge.section == "edges", f"an edge label did not resolve: {edge}")
     # a mindmap invents its own ids, so again only the text can match
     branch = sample("mindmap").find_text("diagram-5-node_2", "Forms")
     check(
-        branch is not None and branch[0] == "nodes" and branch[2] == "label",
+        branch is not None and branch.section == "nodes" and branch.field == "label",
         f"a mindmap branch did not resolve: {branch}",
     )
     check(
         flowchart.find_text("", "nothing here draws this") is None,
         "text that is not in the diagram resolved to an element",
     )
+
+    # a label inside a box is one line of a multi-line field, not the field
+    classes = sample("class")
+    member = classes.find_text("diagram-0-classId-Animal-0", "+age : int")
+    check(
+        member == TextTarget("classes", 0, "attributes", 1),
+        f"the second attribute did not resolve to its own line: {member}",
+    )
+    # what mermaid classed the label, and where it sits among its like-classed
+    # siblings, is what tells the members of a class from its methods
+    method_by_class = classes.find_text(
+        "diagram-0-classId-Animal-0", "+name : String", ["label", "members-group", "text"], 0
+    )
+    check(
+        method_by_class == TextTarget("classes", 0, "attributes", 0),
+        f"a member did not resolve through what mermaid classed it: {method_by_class}",
+    )
+    methods_by_class = classes.find_text(
+        "diagram-0-classId-Animal-0", "+makeSound() void", ["label", "methods-group", "text"], 0
+    )
+    check(
+        methods_by_class == TextTarget("classes", 0, "methods", 0),
+        f"a method did not resolve through its group: {methods_by_class}",
+    )
+    # a class member is drawn whole, so the line is the thing that gets edited
+    if member is not None:
+        attribute_lines = classes.rows("classes")[0]["attributes"]
+        check(classes.text_at(member) == "+age : int", f"a member read back as {classes.text_at(member)!r}")
+        check(classes.set_text(member, "+age : int64"), "writing a member reported no change")
+        check(
+            classes.rows("classes")[0]["attributes"] == "+name : String\n+age : int64",
+            "writing one member disturbed the other: "
+            f"{classes.rows('classes')[0]['attributes']!r}",
+        )
+        classes.rows("classes")[0]["attributes"] = attribute_lines
+    # mermaid draws a method's return type after a colon, which the line lacks
+    method = classes.find_text("diagram-0-classId-Animal-0", "+makeSound() : void")
+    check(
+        method == TextTarget("classes", 0, "methods", 0),
+        f"a method did not resolve to its line: {method}",
+    )
+    named = classes.find_text("diagram-0-classId-Animal-0", "Animal")
+    check(
+        named == TextTarget("classes", 0, "name"),
+        f"the class name resolved to a line instead of the field: {named}",
+    )
+
+    # an entity column arrives as four cells, and a cell is what gets edited
+    er = sample("er")
+    entities = er.rows("entities")
+    original_order = entities[1]["attributes"]
+    column = er.find_text("diagram-1-entity-CUSTOMER-0", "name")
+    check(
+        column is not None and column.field == "attributes" and column.line == 1,
+        f"an entity column did not resolve to its line: {column}",
+    )
+    comment = er.find_text("diagram-1-entity-CUSTOMER-0", "primary key")
+    check(
+        comment is not None and comment.line == 0,
+        f"an entity comment did not resolve to its column: {comment}",
+    )
+    # ORDER has two columns typed "string", so the second must not resolve to
+    # the first: the cell says which one it is, the text alone cannot
+    first_type = er.find_text("diagram-1-entity-ORDER-1", "string", ["attribute-type"], 0)
+    second_type = er.find_text("diagram-1-entity-ORDER-1", "string", ["attribute-type"], 1)
+    check(
+        first_type == TextTarget("entities", 1, "attributes", 0, (0, 6)),
+        f"the first column's type did not resolve to its cell: {first_type}",
+    )
+    check(
+        second_type == TextTarget("entities", 1, "attributes", 1, (0, 6)),
+        f"the second column's type did not resolve to its cell: {second_type}",
+    )
+    cell = er.find_text("diagram-1-entity-ORDER-1", "customerId", ["attribute-name"], 1)
+    check(
+        cell == TextTarget("entities", 1, "attributes", 1, (7, 17)),
+        f"a column name did not resolve to its own characters: {cell}",
+    )
+    if cell is not None:
+        check(er.text_at(cell) == "customerId", f"a cell did not read back: {er.text_at(cell)!r}")
+        check(er.set_text(cell, "buyerId"), "writing a cell reported no change")
+        check(
+            entities[1]["attributes"] == "string id PK\nstring buyerId FK\ndate placedAt",
+            f"editing one cell rewrote the field as {entities[1]['attributes']!r}",
+        )
+        entities[1]["attributes"] = original_order
+    if column is not None:
+        # without knowing which cell was clicked, the text still names a word of
+        # the line rather than the line, so the word is what gets edited
+        original = entities[column.index]["attributes"]
+        check(
+            column == TextTarget("entities", 0, "attributes", 1, (7, 11)),
+            f"a column name did not resolve to its own characters: {column}",
+        )
+        check(er.text_at(column) == "name", f"a cell did not read back: {er.text_at(column)!r}")
+        check(er.set_text(column, "label"), "writing a cell reported no change")
+        check(
+            entities[0]["attributes"]
+            == 'string id PK "primary key"\nstring label\nstring email',
+            "writing one cell disturbed the others: " f"{entities[0]['attributes']!r}",
+        )
+        # the window resolves afresh on every double click, so writing the text a
+        # click already points at is a no-op
+        again = er.find_text("diagram-1-entity-CUSTOMER-0", "label", ["attribute-name"], 1)
+        check(
+            again is not None and not er.set_text(again, "label"),
+            "writing the cell's own text reported a change",
+        )
+        entities[column.index]["attributes"] = original
 
     sections = [(key, section) for key in SPEC_ORDER for section in SPECS[key].sections]
     check(
@@ -341,11 +454,13 @@ def main() -> int:
         check(ship is not None, "the flowchart sample has no Ship node to click")
 
         if ship is not None:
-            # double click the label in the page rather than calling the handler
+            # double click the label in the page rather than calling the handler.
+            # mermaid numbers the id it builds as it draws, so only the middle
+            # of it is ours to match on
             clicked = evaluate(
                 window,
                 "(() => {"
-                "  const node = document.querySelector('[id$=\"-flowchart-Ship-0\"]');"
+                "  const node = document.querySelector('[id*=\"-flowchart-Ship-\"]');"
                 "  if (!node) return 'no node with that id';"
                 "  const label = node.querySelector('p, text, tspan') || node;"
                 "  label.dispatchEvent(new MouseEvent('dblclick', {bubbles: true}));"
@@ -378,7 +493,7 @@ def main() -> int:
             over = evaluate(
                 window,
                 "(() => { const box = document.getElementById('label-editor');"
-                "  const label = document.querySelector('[id$=\"-flowchart-Ship-0\"] p');"
+                "  const label = document.querySelector('[id*=\"-flowchart-Ship-\"] p');"
                 "  if (!box || !label) return 'no box or no label';"
                 "  const a = box.getBoundingClientRect();"
                 "  const b = label.getBoundingClientRect();"
@@ -415,6 +530,121 @@ def main() -> int:
             # put the sample back, for the checks that follow
             rows[ship]["label"] = "Ship order"
             window._schedule_update(immediate=True)
+            settle(SETTLE_MS)
+            application.processEvents()
+
+        print("\nchecking that a double click edits one line of a class member list")
+        window.type_combo.setCurrentIndex(SPEC_ORDER.index("class"))
+        application.processEvents()
+        settle(SETTLE_MS)
+        application.processEvents()
+
+        animal = window.document.rows("classes")[0]
+        original = animal["attributes"]
+        clicked = evaluate(
+            window,
+            "(() => {"
+            "  const box = document.querySelector('[id*=\"-classId-Animal-\"]');"
+            "  if (!box) return 'no class box, the stage holds: '"
+            "    + Array.from(document.querySelectorAll('g[id]')).map(n => n.id)"
+            "      .slice(0, 4).join(' | ');"
+            "  const line = Array.from(box.querySelectorAll('p'))"
+            "    .find(p => p.textContent.trim() === '+age : int');"
+            "  if (!line) return 'no attribute line';"
+            "  line.dispatchEvent(new MouseEvent('dblclick', {bubbles: true}));"
+            "  return line.textContent.trim();"
+            "})()",
+        )
+        check(clicked == "+age : int", f"the class box does not show the attribute: {clicked!r}")
+
+        held = evaluate(
+            window,
+            "(() => { const box = document.getElementById('label-editor');"
+            " return box ? [box.style.display, box.value] : null; })()",
+        )
+        check(
+            held == ["block", "+age : int"],
+            f"the editor did not open on the attribute line: {held}",
+        )
+
+        evaluate(
+            window,
+            "(() => { const box = document.getElementById('label-editor');"
+            "  box.value = '+age : int64';"
+            "  box.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));"
+            "  return true; })()",
+        )
+        settle(SETTLE_MS)
+        application.processEvents()
+        check(
+            animal["attributes"] == "+name : String\n+age : int64",
+            f"editing an attribute rewrote the field as {animal['attributes']!r}",
+        )
+        check(
+            "+age : int64" in generate(window.document).code,
+            "the regenerated mermaid does not carry the new attribute",
+        )
+
+        animal["attributes"] = original
+        window._schedule_update(immediate=True)
+        settle(SETTLE_MS)
+        application.processEvents()
+
+        print("\nchecking that a double click on an entity cell edits that cell")
+        window.type_combo.setCurrentIndex(SPEC_ORDER.index("er"))
+        application.processEvents()
+        settle(SETTLE_MS)
+        application.processEvents()
+
+        order = window.document.rows("entities")[1]
+        original = order["attributes"]
+        # ORDER has two columns typed "string": click the second one's type cell
+        clicked = evaluate(
+            window,
+            "(() => {"
+            "  const box = document.querySelector('[id*=\"-entity-ORDER-\"]');"
+            "  if (!box) return 'no entity box';"
+            "  const cells = Array.from(box.querySelectorAll('p'))"
+            "    .filter(p => p.textContent.trim() === 'string');"
+            "  if (cells.length < 2) return 'only ' + cells.length + ' string cells';"
+            "  cells[1].dispatchEvent(new MouseEvent('dblclick', {bubbles: true}));"
+            "  return cells[1].textContent.trim();"
+            "})()",
+        )
+        check(clicked == "string", f"the entity box does not show the cell: {clicked!r}")
+
+        held = evaluate(
+            window,
+            "(() => { const box = document.getElementById('label-editor');"
+            " return box ? [box.style.display, box.value] : null; })()",
+        )
+        check(
+            held == ["block", "string"],
+            f"the editor did not open on the cell alone: {held}",
+        )
+
+        evaluate(
+            window,
+            "(() => { const box = document.getElementById('label-editor');"
+            "  box.value = 'varchar';"
+            "  box.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));"
+            "  return true; })()",
+        )
+        settle(SETTLE_MS)
+        application.processEvents()
+        check(
+            order["attributes"] == "string id PK\nvarchar customerId FK\ndate placedAt",
+            f"editing the second column's type rewrote the field as {order['attributes']!r}",
+        )
+        check(
+            "string id PK" in generate(window.document).code,
+            "the first column was caught up in editing the second",
+        )
+
+        order["attributes"] = original
+        window._schedule_update(immediate=True)
+        settle(SETTLE_MS)
+        application.processEvents()
 
         print("\nchecking the SVG export, which reads the picture back out of the page")
         svg_path = Path(tempfile.gettempdir()) / "diagram-maker-smoke.svg"

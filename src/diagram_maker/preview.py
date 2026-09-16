@@ -247,6 +247,47 @@ function labelUnder(node) {
   return { holder: holder, owner: owner };
 }
 
+// What mermaid classed a label says what kind of thing it is - a class member,
+// the name cell of an entity column - and its place among the labels classed
+// the same way says which one of them, which is how Python tells the third
+// entity column from the first.  Every class on the way up is sent, because the
+// kinds sit at different depths: a class member is named by the group around
+// it, an entity cell by itself.
+function classesOf(element) {
+  const names = [];
+  let node = element;
+  while (node && node !== stage) {
+    for (const name of (node.getAttribute('class') || '').split(/\\s+/)) {
+      if (name && names.indexOf(name) < 0) names.push(name);
+    }
+    node = node.parentElement;
+  }
+  return names;
+}
+
+function groupOf(element) {
+  let node = element;
+  while (node && node !== stage) {
+    if (node.tagName.toLowerCase() === 'g' && node.getAttribute('class')) return node;
+    node = node.parentElement;
+  }
+  return null;
+}
+
+// Mermaid classes the labels of one line alike and makes them siblings, so
+// counting back through them is what says which line this one draws.
+function orderOf(element) {
+  const group = groupOf(element);
+  if (!group || !group.parentElement) return 0;
+  const signature = group.getAttribute('class');
+  let order = 0;
+  for (const sibling of group.parentElement.children) {
+    if (sibling === group) return order;
+    if (sibling.getAttribute && sibling.getAttribute('class') === signature) order += 1;
+  }
+  return order;
+}
+
 stage.addEventListener('dblclick', function (event) {
   const found = labelUnder(event.target);
   if (!found.holder) return;
@@ -256,7 +297,9 @@ stage.addEventListener('dblclick', function (event) {
   const id = owner ? (owner.getAttribute('data-id') || owner.id || '') : '';
   editTarget = found.holder;
   event.preventDefault();
-  setTitle('edit', encodeURIComponent(JSON.stringify({ id: id, text: text })));
+  setTitle('edit', encodeURIComponent(JSON.stringify({
+    id: id, text: text, classes: classesOf(found.holder), order: orderOf(found.holder)
+  })));
 }, true);
 
 window.__svg = '';
@@ -296,6 +339,20 @@ if (typeof mermaid === 'undefined' || window.__cdnFailed) {
       clearStrayNodes();
     }
   };
+
+  // Mermaid renders through a scratch element it puts in the page and takes
+  // away again, so two renders in flight at once trip over each other and the
+  // second fails outright.  Edits can arrive faster than a slow diagram takes
+  // to draw, so each render waits for the one before it: the last one still
+  // ends up on screen, it just gets there in its turn.
+  const inTurn = window.renderDiagram;
+  let queue = Promise.resolve();
+  window.renderDiagram = function (code) {
+    queue = queue.then(function () {
+      return inTurn(code);
+    });
+    return queue;
+  };
 }
 </script>
 </body>
@@ -318,8 +375,10 @@ class PreviewPane(QWidget):
     #: ``(ok, message)`` - emitted after every render attempt
     rendered = pyqtSignal(bool, str)
 
-    #: ``(element_id, text)`` - a label in the diagram was double clicked
-    edit_requested = pyqtSignal(str, str)
+    #: ``(element_id, text, classes, order)`` - a label in the diagram was
+    #: double clicked, with what mermaid classed it and where it sits among the
+    #: labels classed the same way
+    edit_requested = pyqtSignal(str, str, list, int)
 
     #: the text typed over the label the window was last asked about
     edit_committed = pyqtSignal(str)
@@ -396,15 +455,20 @@ class PreviewPane(QWidget):
             self.edit_committed.emit(unquote(detail))
 
     def _on_edit_requested(self, detail: str) -> None:
-        """Report the label a double click landed on, as ``(id, text)``."""
+        """Report the label a double click landed on."""
         try:
             clicked = json.loads(unquote(detail))
         except ValueError:
             return
-        if isinstance(clicked, dict):
-            self.edit_requested.emit(
-                str(clicked.get("id", "")), str(clicked.get("text", ""))
-            )
+        if not isinstance(clicked, dict):
+            return
+        classes = clicked.get("classes")
+        self.edit_requested.emit(
+            str(clicked.get("id", "")),
+            str(clicked.get("text", "")),
+            [str(name) for name in classes] if isinstance(classes, list) else [],
+            int(clicked.get("order") or 0),
+        )
 
     # -- public API -------------------------------------------------------- #
 

@@ -10,9 +10,9 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import Any, Iterable, Iterator, Sequence
 
-from .specs import SPECS, DiagramSpec, ItemSpec, get_spec
+from .specs import LINES, SPECS, DiagramSpec, ItemSpec, get_spec
 
 FILE_SUFFIX = ".diagram.json"
 
@@ -31,6 +31,54 @@ def _rows(*specs: tuple[Any, ...]) -> list[dict[str, Any]]:
 def _schema(item_spec: ItemSpec) -> tuple[str, ...]:
     """The field names of a section, used to decide whether rows can carry over."""
     return tuple(f.name for f in item_spec.fields)
+
+
+def _collapsed(value: Any) -> str:
+    """``value`` as the single line of text a diagram would draw for it."""
+    return " ".join(str(value or "").split())
+
+
+def _letters(value: str) -> str:
+    """``value`` without the punctuation mermaid adds or drops when it draws."""
+    return "".join(character for character in value if character.isalnum()).lower()
+
+
+def _wordish(character: str) -> bool:
+    return character.isalnum() or character == "_"
+
+
+def _span_in(line: str, text: str) -> tuple[int, int] | None:
+    """Where ``text`` sits in ``line`` as a word or phrase of its own.
+
+    Bounded by characters that cannot be part of a word, so that clicking the
+    ``id`` column of an entity does not land inside ``customerId``.
+    """
+    start = 0
+    while (found := line.find(text, start)) >= 0:
+        end = found + len(text)
+        before = line[found - 1] if found else " "
+        after = line[end] if end < len(line) else " "
+        if not _wordish(before) and not _wordish(after):
+            return found, end
+        start = found + 1
+    return None
+
+
+@dataclass(frozen=True)
+class TextTarget:
+    """Where one piece of text drawn in the preview is kept.
+
+    ``line`` is set when the diagram draws part of a multi-line field - a class
+    member, an entity column - rather than the whole field, and ``span`` narrows
+    that down to some characters of the line: an entity column is drawn as four
+    cells, and clicking one of them edits that cell and not the column.
+    """
+
+    section: str
+    index: int
+    field: str
+    line: int | None = None
+    span: tuple[int, int] | None = None
 
 
 @dataclass
@@ -93,8 +141,14 @@ class DiagramDocument:
             for index, row in enumerate(self.rows(section.key)):
                 yield section, index, row
 
-    def find_text(self, element_id: str, text: str) -> tuple[str, int, str] | None:
-        """The row and field a double click on ``text`` in the preview refers to.
+    def find_text(
+        self,
+        element_id: str,
+        text: str,
+        classes: Sequence[str] = (),
+        order: int = 0,
+    ) -> TextTarget | None:
+        """Where the text a double click landed on is kept, or ``None``.
 
         Mermaid names what it draws after the ids it was handed, as
         ``diagram-0-flowchart-Ship-0``, so an id carrying a row's id is the
@@ -103,32 +157,159 @@ class DiagramDocument:
         charts, gantt bars) the drawn text is matched against the field each
         section declares in :attr:`~diagram_maker.specs.ItemSpec.text_field`.
 
-        Returns ``(section, index, field)``, or ``None`` when the click belongs
-        to nothing that can be edited.
+        Text that comes from one line of a multi-line field - a class member, an
+        entity column - resolves to that line, and where the line is itself
+        drawn in pieces (an entity column is four cells) to the piece that was
+        clicked, which ``classes`` and ``order`` describe.
         """
-        # the numbers mermaid adds are its own; a row id that is a number would
-        # match every element on the page
+        wanted = _collapsed(text)
+        if not wanted:
+            return None
+
+        row = self._row_named_by(element_id) or self._row_drawing(wanted)
+        if row is not None:
+            section, index = row
+            part = self._row_part(section, index, wanted, classes, order)
+            if part is not None:
+                return TextTarget(section, index, *part)
+            return TextTarget(section, index, self.spec.section(section).text_field)
+
+        # no row draws that text as a whole, but a line of one still might: a
+        # note is drawn from a multi-line field under an id of mermaid's own
+        for item_spec in self.spec.sections:
+            for index in range(len(self.rows(item_spec.key))):
+                part = self._row_part(item_spec.key, index, wanted, (), 0)
+                if part is not None:
+                    return TextTarget(item_spec.key, index, *part)
+        return None
+
+    def text_at(self, target: TextTarget) -> str:
+        """The text ``target`` points at, or ``""`` once it has gone."""
+        row = self._row(target.section, target.index)
+        if row is None:
+            return ""
+        value = str(row.get(target.field, ""))
+        if target.line is None:
+            return value
+        lines = value.splitlines()
+        if not (0 <= target.line < len(lines)):
+            return ""
+        line = lines[target.line]
+        if target.span is None:
+            return line
+        start, end = target.span
+        return line[start:end]
+
+    def set_text(self, target: TextTarget, text: str) -> bool:
+        """Keep ``text`` at ``target``; returns whether anything changed."""
+        row = self._row(target.section, target.index)
+        if row is None:
+            return False
+        if target.line is None:
+            if str(row.get(target.field, "")) == text:
+                return False
+            row[target.field] = text
+            return True
+
+        value = str(row.get(target.field, ""))
+        # splitlines drops a trailing newline, which is not ours to drop
+        trailing = "\n" if value.endswith("\n") else ""
+        lines = value.splitlines()
+        if not (0 <= target.line < len(lines)):
+            return False
+        line = lines[target.line]
+        if target.span is None:
+            if line == text:
+                return False
+            lines[target.line] = text
+        else:
+            start, end = target.span
+            if line[start:end] == text:
+                return False
+            lines[target.line] = line[:start] + text + line[end:]
+        row[target.field] = "\n".join(lines) + trailing
+        return True
+
+    def _row(self, section_key: str, index: int) -> dict[str, Any] | None:
+        rows = self.rows(section_key)
+        return rows[index] if 0 <= index < len(rows) else None
+
+    def _row_named_by(self, element_id: str) -> tuple[str, int] | None:
+        """The row whose id appears in ``element_id``, if there is one."""
+        # the numbers are mermaid's own, and a row id that is a number would
+        # otherwise match every element on the page
         parts = {
             part for part in (element_id or "").split("-") if part and not part.isdigit()
         }
-        if parts:
-            for section in self.spec.sections:
-                if not (section.id_field and section.text_field):
-                    continue
-                for index, row in enumerate(self.rows(section.key)):
-                    if str(row.get(section.id_field, "")) in parts:
-                        return section.key, index, section.text_field
-
-        wanted = " ".join((text or "").split())
-        if not wanted:
+        if not parts:
             return None
+        for section in self.spec.sections:
+            if not section.id_field:
+                continue
+            for index, row in enumerate(self.rows(section.key)):
+                if str(row.get(section.id_field, "")) in parts:
+                    return section.key, index
+        return None
+
+    def _row_drawing(self, text: str) -> tuple[str, int] | None:
+        """The row whose declared text field draws exactly ``text``."""
         for section in self.spec.sections:
             if not section.text_field:
                 continue
             for index, row in enumerate(self.rows(section.key)):
-                drawn = " ".join(str(row.get(section.text_field, "")).split())
-                if drawn and drawn == wanted:
-                    return section.key, index, section.text_field
+                if _collapsed(row.get(section.text_field, "")) == text:
+                    return section.key, index
+        return None
+
+    def _row_part(
+        self,
+        section_key: str,
+        index: int,
+        text: str,
+        classes: Sequence[str],
+        order: int,
+    ) -> tuple[str, int, tuple[int, int] | None] | None:
+        """The line of a multi-line field that ``text`` is drawn from, and where.
+
+        Returns ``(field, line, span)``, with ``span`` left out when the whole
+        line was clicked rather than part of it.
+        """
+        row = self._row(section_key, index)
+        if row is None:
+            return None
+        section = self.spec.section(section_key)
+        drawn = {
+            field.name: str(row.get(field.name, "")).splitlines()
+            for field in section.fields
+            if field.kind == LINES
+        }
+
+        # what mermaid classed the label says which field it belongs to, and its
+        # place among the labels classed the same way says which line that is -
+        # so this is the pass that knows clicking one cell of an entity column
+        # means that cell and not the other three
+        for token, name in section.line_fields:
+            lines = drawn.get(name, [])
+            if token in classes and 0 <= order < len(lines):
+                line = lines[order]
+                span = _span_in(line, text)
+                # a span covering the line is just the line
+                if span == (0, len(line)):
+                    span = None
+                return name, order, span
+
+        # failing that, go by the text: the whole line first, then a word or
+        # phrase of it, then ignoring the punctuation mermaid adds when it draws
+        for match in (
+            lambda line: _collapsed(line) == text,
+            lambda line: _span_in(line, text) is not None,
+            lambda line: _letters(line) == _letters(text),
+        ):
+            for name, lines in drawn.items():
+                for number, line in enumerate(lines):
+                    if match(line):
+                        span = None if _collapsed(line) == text else _span_in(line, text)
+                        return name, number, span
         return None
 
     def set_kind(self, kind: str) -> None:

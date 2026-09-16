@@ -104,6 +104,11 @@ class ItemSpec:
     #: click on a label finds the row it belongs to; empty means it cannot.
     text_field: str = ""
     id_field: str = ""
+    #: for a box that mermaid draws one line of a multi-line field per row - the
+    #: members of a class, the columns of an entity: the class it puts on that
+    #: row's labels -> the field the row comes from.  A click names one of these
+    #: and its position among them, which is what says which line it is.
+    line_fields: tuple[tuple[str, str], ...] = ()
 
     def blank(self) -> dict[str, Any]:
         return {f.name: f.default for f in self.fields}
@@ -334,6 +339,8 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
                 summary=("name",),
                 text_field="name",
                 id_field="name",
+                # mermaid draws the members and the methods as rows of their own
+                line_fields=(("members-group", "attributes"), ("methods-group", "methods")),
                 tip="One attribute or method per line, e.g. '+name : String'.",
                 fields=(
                     _f("name", "Name", TEXT, "", placeholder="Animal"),
@@ -388,11 +395,19 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
         sections=(
             ItemSpec(
                 key="entities",
-                text_field="name",
-                id_field="name",
                 label="Entities",
                 singular="Entity",
                 summary=("name",),
+                text_field="name",
+                id_field="name",
+                # mermaid draws a column as four cells, and every one of them
+                # belongs to the same line of the field
+                line_fields=(
+                    ("attribute-name", "attributes"),
+                    ("attribute-type", "attributes"),
+                    ("attribute-keys", "attributes"),
+                    ("attribute-comment", "attributes"),
+                ),
                 tip="One column per line: 'string name PK \"comment\"'.",
                 fields=(
                     _f("name", "Name", TEXT, "", placeholder="CUSTOMER"),

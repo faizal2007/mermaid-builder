@@ -42,7 +42,7 @@ from PyQt6.QtWidgets import (
 )
 
 from . import shapes, style
-from .document import FILE_SUFFIX, DiagramDocument, sample
+from .document import FILE_SUFFIX, DiagramDocument, TextTarget, sample
 from .generators import Result, generate
 from .preview import MERMAID_VERSION, PreviewPane, standalone_html
 from .specs import BOOL, CHOICE, COLOUR, FLOAT, INT, LINES, SPECS, SPEC_ORDER, Field
@@ -121,7 +121,7 @@ class MainWindow(QMainWindow):
         self._dirty = False
         self._result = Result(code="")
         #: what a double click in the preview pointed at, until it is written
-        self._editing: tuple[str, int, str] | None = None
+        self._editing: TextTarget | None = None
 
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(app_icon())
@@ -411,34 +411,28 @@ class MainWindow(QMainWindow):
 
     # -------------------------------------------------------------- editing #
 
-    def _edit_label(self, element_id: str, text: str) -> None:
+    def _edit_label(self, element_id: str, text: str, classes: list, order: int) -> None:
         """A label in the preview was double clicked: edit it where it sits.
 
         The element is selected as well, so the tree and the property form show
         where the text lives while it is being changed.
         """
-        found = self.document.find_text(element_id, text)
-        if found is None:
+        target = self.document.find_text(element_id, text, classes, order)
+        if target is None:
             self.statusBar().showMessage(
                 f"Nothing to edit there - {text!r} is not drawn from an element", 4000
             )
             return
-        section_key, index, field = found
-        self._editing = found
-        self._rebuild_tree(select=(section_key, index))
-        self.preview.edit_text(str(self.document.rows(section_key)[index].get(field, "")))
+        self._editing = target
+        self._rebuild_tree(select=(target.section, target.index))
+        self.preview.edit_text(self.document.text_at(target))
 
     def _write_label(self, text: str) -> None:
         """Keep what was typed over a label, and redraw."""
-        if self._editing is None:
+        if self._editing is None or not self.document.set_text(self._editing, text):
             return
-        section_key, index, field = self._editing
-        rows = self.document.rows(section_key)
-        if not (0 <= index < len(rows)) or str(rows[index].get(field, "")) == text:
-            return
-        rows[index][field] = text
         self._mark_modified()
-        self._rebuild_tree(select=(section_key, index))
+        self._rebuild_tree(select=(self._editing.section, self._editing.index))
         self._schedule_update()
 
     # ------------------------------------------------------------- tree view #

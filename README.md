@@ -62,7 +62,9 @@ The window has three parts:
 - **Preview** (centre) — the rendered diagram, redrawn as you type. Double-click
   any label to edit it where it sits: the box opens over the text, Enter keeps
   the change, Escape or clicking away drops it, and the element is selected in
-  the tree meanwhile. Mermaid names most of what it draws after the ids it was
+  the tree meanwhile. What gets edited is what you clicked — inside a class or
+  an entity box that is one member line, or one cell of a column, rather than
+  the whole list. Mermaid names most of what it draws after the ids it was
   given, so a click is matched to an element by id first and by the text it
   draws second — which covers the mindmaps and charts that carry no ids.
 - **Mermaid source** (bottom) — the generated code, read-only. The visual editor
