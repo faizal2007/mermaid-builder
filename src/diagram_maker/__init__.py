@@ -33,7 +33,7 @@ __all__ = [
     "sample",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 #: the app's taskbar identity on Windows, kept in step by hand with the
 #: AppUserModelId define in packaging\\diagram-maker.iss

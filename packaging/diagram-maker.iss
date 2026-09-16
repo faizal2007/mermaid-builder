@@ -17,7 +17,7 @@
 
 ; fallbacks, for when the script is compiled without a build in front of it
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "0.2.0"
 #endif
 #ifndef BundleDir
   #define BundleDir "..\dist\Diagram Maker"
