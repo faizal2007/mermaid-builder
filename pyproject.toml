@@ -1,0 +1,30 @@
+[project]
+name = "diagram-maker"
+version = "0.1.0"
+description = "Build diagrams visually and export them as mermaid"
+readme = "README.md"
+authors = [
+  { name = "Faizal Sadri", email = "faizal@geekdo.me" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    'pyqt6',
+    'pyqt6-webengine>=6.11.0',
+]
+
+[project.optional-dependencies]
+# pyqt6-tools is abandoned (last release 2022) and hard-pins pyqt6==6.4.2.
+# It pulls pyqt6-plugins, which only ships wheels up to cp311, so it can never
+# resolve on modern Python. Use PyQt6's bundled uic instead:
+#   python -m PyQt6.uic.pyuic -o form.py form.ui
+# This extra only provides the Qt Designer GUI itself.
+designer = [
+    'pyside6'
+]
+
+[project.scripts]
+diagram-maker = "diagram_maker:main"
+
+[build-system]
+requires = ["uv_build>=0.12.14,<0.13.0"]
+build-backend = "uv_build"

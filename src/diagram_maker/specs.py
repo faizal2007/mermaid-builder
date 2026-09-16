@@ -1,0 +1,683 @@
+"""Declarative description of every mermaid diagram type the app can build.
+
+A :class:`DiagramSpec` is the single source of truth for a diagram type: it lists
+the diagram-level options, the element sections (nodes, edges, ...), and the
+fields each element has.  ``generators.py`` turns that data into mermaid source,
+and ``window.py`` turns it into widgets.  Adding a diagram type therefore means
+adding one entry here plus one function in ``generators.py``.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+from typing import Any, Sequence
+
+# --------------------------------------------------------------------------- #
+# field kinds
+# --------------------------------------------------------------------------- #
+
+TEXT = "text"
+LINES = "lines"
+CHOICE = "choice"
+INT = "int"
+FLOAT = "float"
+BOOL = "bool"
+
+#: value shown for an unset choice
+UNSET = "(default)"
+
+DIRECTIONS = ("TD", "TB", "BT", "LR", "RL")
+
+THEMES = (
+    "default",
+    "redux-color",
+    "redux-dark-color",
+    "neutral",
+    "dark",
+    "forest",
+    "base",
+    "neo",
+    "neo-dark",
+)
+
+LOOKS = ("classic", "neo", "handDrawn")
+
+
+@dataclass(frozen=True)
+class Field:
+    """One editable property of an element (or of the diagram itself)."""
+
+    name: str
+    label: str
+    kind: str = TEXT
+    default: Any = ""
+    choices: tuple[str, ...] = ()
+    minimum: float = 0
+    maximum: float = 100
+    step: float = 1
+    decimals: int = 2
+    placeholder: str = ""
+    tip: str = ""
+
+    def coerce(self, value: Any) -> Any:
+        """Return ``value`` converted to the Python type this field stores."""
+        try:
+            if self.kind == INT:
+                return int(value)
+            if self.kind == FLOAT:
+                return round(float(value), self.decimals)
+            if self.kind == BOOL:
+                return bool(value)
+        except (TypeError, ValueError):
+            return self.default
+        return "" if value is None else str(value)
+
+
+def _f(name: str, label: str, kind: str = TEXT, default: Any = "", **kw: Any) -> Field:
+    return Field(name=name, label=label, kind=kind, default=default, **kw)
+
+
+# --------------------------------------------------------------------------- #
+# element sections
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class ItemSpec:
+    """A repeatable element collection, e.g. the nodes of a flowchart."""
+
+    key: str
+    label: str
+    singular: str
+    fields: tuple[Field, ...]
+    summary: tuple[str, ...] = ()
+    tip: str = ""
+
+    def blank(self) -> dict[str, Any]:
+        return {f.name: f.default for f in self.fields}
+
+    def summarize(self, item: dict[str, Any]) -> str:
+        parts = [
+            " ".join(str(item.get(name, "")).split())
+            for name in (self.summary or (self.fields[0].name,))
+        ]
+        parts = [p for p in parts if p]
+        return " — ".join(parts) if parts else f"(new {self.singular.lower()})"
+
+
+@dataclass(frozen=True)
+class DiagramSpec:
+    key: str
+    name: str
+    options: tuple[Field, ...]
+    sections: tuple[ItemSpec, ...]
+    blurb: str = ""
+
+    def option(self, name: str) -> Field | None:
+        for f in self.options:
+            if f.name == name:
+                return f
+        return None
+
+    def section(self, key: str) -> ItemSpec | None:
+        for s in self.sections:
+            if s.key == key:
+                return s
+        return None
+
+
+# --------------------------------------------------------------------------- #
+# common options
+# --------------------------------------------------------------------------- #
+
+COMMON_OPTIONS: tuple[Field, ...] = (
+    _f("title", "Title", TEXT, "", placeholder="optional diagram title"),
+    _f("theme", "Theme", CHOICE, "", choices=THEMES),
+    _f("look", "Look", CHOICE, "", choices=LOOKS),
+)
+
+
+def _with_common(spec: DiagramSpec) -> DiagramSpec:
+    """Put the shared options first, keeping any type specific field of the same
+    name last so it would win."""
+    extra = tuple(f for f in spec.options if f.name not in {c.name for c in COMMON_OPTIONS})
+    return replace(spec, options=COMMON_OPTIONS + extra)
+
+
+# --------------------------------------------------------------------------- #
+# shallow helpers for the per-type definitions
+# --------------------------------------------------------------------------- #
+
+_ARROW_STYLES = (
+    "Arrow  -->",
+    "Open  ---",
+    "Dotted  -.->",
+    "Dotted open  -.-",
+    "Thick  ==>",
+    "Thick open  ===",
+    "Circle  --o",
+    "Cross  --x",
+    "Bidirectional  <-->",
+)
+
+
+# --------------------------------------------------------------------------- #
+# the registry
+# --------------------------------------------------------------------------- #
+
+_RAW_SPECS: Sequence[DiagramSpec] = (
+    # ---------------------------------------------------------------- flowchart
+    DiagramSpec(
+        key="flowchart",
+        name="Flowchart",
+        blurb="Boxes and arrows: processes, decisions, systems.",
+        options=(
+            _f("direction", "Direction", CHOICE, "TD", choices=DIRECTIONS),
+        ),
+        sections=(
+            ItemSpec(
+                key="nodes",
+                label="Nodes",
+                singular="Node",
+                summary=("id", "label"),
+                tip="Ids must be unique. Letters, digits and underscore only.",
+                fields=(
+                    _f("id", "Id", TEXT, "", placeholder="A"),
+                    _f("label", "Label", TEXT, "", placeholder="Start"),
+                    _f(
+                        "shape",
+                        "Shape",
+                        CHOICE,
+                        "Rectangle",
+                        choices=(
+                            "Rectangle",
+                            "Rounded",
+                            "Stadium",
+                            "Subroutine",
+                            "Cylinder",
+                            "Circle",
+                            "Double circle",
+                            "Rhombus",
+                            "Hexagon",
+                            "Parallelogram",
+                            "Trapezoid",
+                            "Asymmetric",
+                        ),
+                    ),
+                    _f("container", "Subgraph", TEXT, "", placeholder="optional group name"),
+                    _f("style", "Style", TEXT, "", placeholder="fill:#f9f,stroke:#333"),
+                ),
+            ),
+            ItemSpec(
+                key="edges",
+                label="Edges",
+                singular="Edge",
+                summary=("source", "label", "target"),
+                tip="Reference node ids declared above.",
+                fields=(
+                    _f("source", "From", TEXT, "", placeholder="A"),
+                    _f("target", "To", TEXT, "", placeholder="B"),
+                    _f("label", "Label", TEXT, ""),
+                    _f("style", "Line", CHOICE, _ARROW_STYLES[0], choices=_ARROW_STYLES),
+                    _f("length", "Extra length", INT, 0, minimum=0, maximum=4),
+                ),
+            ),
+        ),
+    ),
+    # ---------------------------------------------------------------- sequence
+    DiagramSpec(
+        key="sequence",
+        name="Sequence",
+        blurb="Messages exchanged between participants over time.",
+        options=(
+            _f("autonumber", "Auto number messages", BOOL, False),
+        ),
+        sections=(
+            ItemSpec(
+                key="participants",
+                label="Participants",
+                singular="Participant",
+                summary=("alias", "label"),
+                fields=(
+                    _f("alias", "Id", TEXT, "", placeholder="A"),
+                    _f("label", "Display name", TEXT, "", placeholder="Alice"),
+                    _f("kind", "Kind", CHOICE, "participant", choices=("participant", "actor")),
+                ),
+            ),
+            ItemSpec(
+                key="messages",
+                label="Messages",
+                singular="Message",
+                summary=("sender", "text", "receiver"),
+                fields=(
+                    _f("sender", "From", TEXT, "", placeholder="A"),
+                    _f("receiver", "To", TEXT, "", placeholder="B"),
+                    _f("text", "Text", TEXT, ""),
+                    _f(
+                        "style",
+                        "Line",
+                        CHOICE,
+                        "Solid arrow  ->>",
+                        choices=(
+                            "Solid arrow  ->>",
+                            "Dashed arrow  -->>",
+                            "Solid line  ->",
+                            "Dashed line  -->",
+                            "Solid cross  -x",
+                            "Dashed cross  --x",
+                            "Solid async  -)",
+                            "Dashed async  --)",
+                        ),
+                    ),
+                ),
+            ),
+            ItemSpec(
+                key="notes",
+                label="Notes",
+                singular="Note",
+                summary=("text",),
+                fields=(
+                    _f("text", "Text", TEXT, ""),
+                    _f(
+                        "placement",
+                        "Placement",
+                        CHOICE,
+                        "over",
+                        choices=("over", "left of", "right of"),
+                    ),
+                    _f("first", "First participant", TEXT, "", placeholder="A"),
+                    _f("second", "Second participant", TEXT, "", placeholder="optional for 'over'"),
+                ),
+            ),
+        ),
+    ),
+    # ---------------------------------------------------------------- class
+    DiagramSpec(
+        key="class",
+        name="Class",
+        blurb="UML classes, interfaces, attributes, methods and relations.",
+        options=(
+            _f("direction", "Direction", CHOICE, "", choices=DIRECTIONS),
+        ),
+        sections=(
+            ItemSpec(
+                key="classes",
+                label="Classes",
+                singular="Class",
+                summary=("name",),
+                tip="One attribute or method per line, e.g. '+name : String'.",
+                fields=(
+                    _f("name", "Name", TEXT, "", placeholder="Animal"),
+                    _f(
+                        "stereotype",
+                        "Stereotype",
+                        CHOICE,
+                        UNSET,
+                        choices=(UNSET, "interface", "abstract", "enumeration", "service"),
+                    ),
+                    _f("attributes", "Attributes", LINES, ""),
+                    _f("methods", "Methods", LINES, ""),
+                ),
+            ),
+            ItemSpec(
+                key="relations",
+                label="Relations",
+                singular="Relation",
+                summary=("source", "kind", "target"),
+                fields=(
+                    _f("source", "From", TEXT, "", placeholder="Animal"),
+                    _f("target", "To", TEXT, "", placeholder="Dog"),
+                    _f(
+                        "kind",
+                        "Kind",
+                        CHOICE,
+                        "Inheritance  <|--",
+                        choices=(
+                            "Inheritance  <|--",
+                            "Realization  ..|>",
+                            "Composition  *--",
+                            "Aggregation  o--",
+                            "Association  -->",
+                            "Dependency  ..>",
+                            "Link  --",
+                        ),
+                    ),
+                    _f("label", "Label", TEXT, ""),
+                    _f("source_card", "From multiplicity", TEXT, "", placeholder="1"),
+                    _f("target_card", "To multiplicity", TEXT, "", placeholder="0..*"),
+                ),
+            ),
+        ),
+    ),
+    # ---------------------------------------------------------------- ER
+    DiagramSpec(
+        key="er",
+        name="Entity relationship",
+        blurb="Database entities, their columns and cardinality.",
+        options=(),
+        sections=(
+            ItemSpec(
+                key="entities",
+                label="Entities",
+                singular="Entity",
+                summary=("name",),
+                tip="One column per line: 'string name PK \"comment\"'.",
+                fields=(
+                    _f("name", "Name", TEXT, "", placeholder="CUSTOMER"),
+                    _f("attributes", "Columns", LINES, ""),
+                ),
+            ),
+            ItemSpec(
+                key="relations",
+                label="Relationships",
+                singular="Relationship",
+                summary=("left", "cardinality", "right"),
+                fields=(
+                    _f("left", "Left entity", TEXT, "", placeholder="CUSTOMER"),
+                    _f("right", "Right entity", TEXT, "", placeholder="ORDER"),
+                    _f(
+                        "cardinality",
+                        "Cardinality",
+                        CHOICE,
+                        "one to zero-or-more  ||--o{",
+                        choices=(
+                            "exactly one to exactly one  ||--||",
+                            "one to zero-or-one  ||--o|",
+                            "one to zero-or-more  ||--o{",
+                            "one to one-or-more  ||--|{",
+                            "zero-or-one to zero-or-more  |o--o{",
+                            "zero-or-more to zero-or-more  }o--o{",
+                            "zero-or-more to one  }o--||",
+                            "one-or-more to one-or-more  }|--|{",
+                        ),
+                    ),
+                    _f("label", "Label", TEXT, "", placeholder="places"),
+                    _f("identifying", "Identifying", BOOL, False),
+                ),
+            ),
+        ),
+    ),
+
+    # ---------------------------------------------------------------- usecase
+    DiagramSpec(
+        key="usecase",
+        name="Use case",
+        blurb="Actors, use cases and system boundaries (mermaid 12).",
+        options=(
+            _f("direction", "Direction", CHOICE, "LR", choices=DIRECTIONS),
+            _f("acc_title", "Accessible title", TEXT, ""),
+            _f("acc_descr", "Accessible description", LINES, ""),
+        ),
+        sections=(
+            ItemSpec(
+                key="boundaries",
+                label="System boundaries",
+                singular="Boundary",
+                summary=("title",),
+                fields=(
+                    _f("id", "Id", TEXT, "", placeholder="ordering"),
+                    _f("title", "Title", TEXT, "", placeholder="Ordering system"),
+                    _f("type", "Type", CHOICE, "rectangle", choices=("rectangle", "package")),
+                ),
+            ),
+            ItemSpec(
+                key="actors",
+                label="Actors",
+                singular="Actor",
+                summary=("id", "label"),
+                fields=(
+                    _f("id", "Id", TEXT, "", placeholder="Customer"),
+                    _f("label", "Display name", TEXT, "", placeholder="Customer"),
+                    _f(
+                        "variant",
+                        "Variant",
+                        CHOICE,
+                        "normal",
+                        choices=("normal", "hollow", "awesome"),
+                    ),
+                    _f("business", "Business actor", BOOL, False),
+                    _f("stereotype", "Stereotype", TEXT, "", placeholder="Employee"),
+                    _f("boundary", "Inside boundary", TEXT, "", placeholder="boundary id"),
+                ),
+            ),
+            ItemSpec(
+                key="usecases",
+                label="Use cases",
+                singular="Use case",
+                summary=("id", "label"),
+                fields=(
+                    _f("id", "Id", TEXT, "", placeholder="Checkout"),
+                    _f("label", "Display name", TEXT, "", placeholder="Checkout"),
+                    _f("shape", "Shape", CHOICE, "Ellipse", choices=("Ellipse", "Rectangle")),
+                    _f("business", "Business use case", BOOL, False),
+                    _f("stereotype", "Stereotype", TEXT, "", placeholder="Core"),
+                    _f("boundary", "Inside boundary", TEXT, "", placeholder="boundary id"),
+                ),
+            ),
+            ItemSpec(
+                key="relations",
+                label="Relationships",
+                singular="Relationship",
+                summary=("source", "kind", "target"),
+                tip="Include/extend need use case endpoints; generalization two of a kind.",
+                fields=(
+                    _f("source", "From", TEXT, ""),
+                    _f("target", "To", TEXT, ""),
+                    _f(
+                        "kind",
+                        "Kind",
+                        CHOICE,
+                        "Association  -->",
+                        choices=(
+                            "Association  -->",
+                            "Association, reversed  <--",
+                            "Association, no arrow  --",
+                            "Association with circle  --o",
+                            "Association with cross  --x",
+                            "Include  ..> : include",
+                            "Extend  ..> : extend",
+                            "Generalization  --|>",
+                        ),
+                    ),
+                    _f("label", "Label", TEXT, ""),
+                ),
+            ),
+            ItemSpec(
+                key="notes",
+                label="Notes",
+                singular="Note",
+                summary=("target", "text"),
+                fields=(
+                    _f("target", "Attached to", TEXT, "", placeholder="actor or use case id"),
+                    _f("text", "Text", LINES, ""),
+                ),
+            ),
+        ),
+    ),
+    # ---------------------------------------------------------------- mindmap
+    DiagramSpec(
+        key="mindmap",
+        name="Mindmap",
+        blurb="Indented tree of a central idea and its branches.",
+        options=(),
+        sections=(
+            ItemSpec(
+                key="nodes",
+                label="Branches",
+                singular="Branch",
+                summary=("label",),
+                tip="Level 1 is the root, level 2 the first ring, and so on.",
+                fields=(
+                    _f("level", "Level", INT, 1, minimum=1, maximum=8),
+                    _f("label", "Label", TEXT, "", placeholder="Idea"),
+                    _f(
+                        "shape",
+                        "Shape",
+                        CHOICE,
+                        "Plain",
+                        choices=(
+                            "Plain",
+                            "Square",
+                            "Rounded",
+                            "Circle",
+                            "Bang",
+                            "Cloud",
+                            "Hexagon",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    ),
+
+    # ---------------------------------------------------------------- gantt
+    DiagramSpec(
+        key="gantt",
+        name="Gantt",
+        blurb="Project schedule with sections, tasks and milestones.",
+        options=(
+            _f("date_format", "Date format", TEXT, "YYYY-MM-DD"),
+            _f("axis_format", "Axis format", TEXT, "%Y-%m-%d"),
+            _f("excludes", "Exclude", TEXT, "", placeholder="weekends"),
+        ),
+        sections=(
+            ItemSpec(
+                key="tasks",
+                label="Tasks",
+                singular="Task",
+                summary=("name", "start", "duration"),
+                tip="Start is a date in the chosen format, or 'after <task id>'.",
+                fields=(
+                    _f("section", "Section", TEXT, "", placeholder="optional group"),
+                    _f("name", "Task", TEXT, "", placeholder="Design"),
+                    _f("id", "Id", TEXT, "", placeholder="optional"),
+                    _f("start", "Start", TEXT, "", placeholder="2026-01-06"),
+                    _f("duration", "Duration", TEXT, "", placeholder="10d"),
+                    _f(
+                        "status",
+                        "Status",
+                        CHOICE,
+                        UNSET,
+                        choices=(UNSET, "done", "active", "crit", "milestone"),
+                    ),
+                ),
+            ),
+        ),
+    ),
+    # ---------------------------------------------------------------- timeline
+    DiagramSpec(
+        key="timeline",
+        name="Timeline",
+        blurb="Chronological events grouped into sections.",
+        options=(),
+        sections=(
+            ItemSpec(
+                key="events",
+                label="Events",
+                singular="Event",
+                summary=("period", "text"),
+                tip="Events with the same section are grouped together.",
+                fields=(
+                    _f("section", "Section", TEXT, "", placeholder="optional group"),
+                    _f("period", "Period", TEXT, "", placeholder="2026"),
+                    _f("text", "Event", TEXT, ""),
+                    _f("extra", "Extra detail", TEXT, ""),
+                ),
+            ),
+        ),
+    ),
+    # ---------------------------------------------------------------- pie
+    DiagramSpec(
+        key="pie",
+        name="Pie chart",
+        blurb="Share of a whole, one slice per row.",
+        options=(
+            _f("show_data", "Show values on chart", BOOL, True),
+        ),
+        sections=(
+            ItemSpec(
+                key="slices",
+                label="Slices",
+                singular="Slice",
+                summary=("label", "value"),
+                fields=(
+                    _f("label", "Label", TEXT, ""),
+                    _f("value", "Value", FLOAT, 1, minimum=0, maximum=1_000_000, step=1),
+                ),
+            ),
+        ),
+    ),
+    # ---------------------------------------------------------------- quadrant
+    DiagramSpec(
+        key="quadrant",
+        name="Quadrant chart",
+        blurb="Points plotted on two axes split into four quadrants.",
+        options=(
+            _f("x_low", "X axis (low)", TEXT, "Low"),
+            _f("x_high", "X axis (high)", TEXT, "High"),
+            _f("y_low", "Y axis (low)", TEXT, "Low"),
+            _f("y_high", "Y axis (high)", TEXT, "High"),
+            _f("q1", "Quadrant 1", TEXT, "Expand"),
+            _f("q2", "Quadrant 2", TEXT, "Promote"),
+            _f("q3", "Quadrant 3", TEXT, "Re-evaluate"),
+            _f("q4", "Quadrant 4", TEXT, "Improve"),
+        ),
+        sections=(
+            ItemSpec(
+                key="points",
+                label="Points",
+                singular="Point",
+                summary=("name",),
+                tip="X and Y are normalised: 0 = low end of the axis, 1 = high end.",
+                fields=(
+                    _f("name", "Name", TEXT, ""),
+                    _f("x", "X", FLOAT, 0.5, minimum=0, maximum=1, step=0.05, decimals=2),
+                    _f("y", "Y", FLOAT, 0.5, minimum=0, maximum=1, step=0.05, decimals=2),
+                ),
+            ),
+        ),
+    ),
+    # ---------------------------------------------------------------- xychart
+    DiagramSpec(
+        key="xychart",
+        name="XY chart",
+        blurb="Bar and line series over a shared category axis.",
+        options=(
+            _f("categories", "Categories", TEXT, "", placeholder="jan, feb, mar"),
+            _f("y_title", "Y axis title", TEXT, ""),
+            _f("y_min", "Y axis min", FLOAT, 0, minimum=-1_000_000, maximum=1_000_000, step=1),
+            _f("y_max", "Y axis max", FLOAT, 100, minimum=-1_000_000, maximum=1_000_000, step=1),
+        ),
+        sections=(
+            ItemSpec(
+                key="series",
+                label="Series",
+                singular="Series",
+                summary=("name", "kind"),
+                tip="Provide one value per category, separated by commas.",
+                fields=(
+                    _f("name", "Name", TEXT, "", placeholder="optional"),
+                    _f("kind", "Kind", CHOICE, "bar", choices=("bar", "line")),
+                    _f("values", "Values", TEXT, "", placeholder="10, 20, 30"),
+                ),
+            ),
+        ),
+    ),
+)
+
+#: every supported diagram type, keyed by its identifier
+def _build_registry() -> dict[str, DiagramSpec]:
+    registry: dict[str, DiagramSpec] = {}
+    for spec in _RAW_SPECS:
+        registry[spec.key] = _with_common(spec)
+    return registry
+
+
+SPECS = _build_registry()
+
+#: display order of the diagram type picker
+SPEC_ORDER: tuple[str, ...] = tuple(spec.key for spec in _RAW_SPECS)
+
+
+def get_spec(key: str) -> DiagramSpec:
+    return SPECS[key]

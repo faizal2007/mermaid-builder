@@ -1,0 +1,162 @@
+# Diagram Maker
+
+A desktop tool for building diagrams visually — like Visio, but every diagram is
+[Mermaid](https://mermaid.js.org/). You assemble a diagram from forms, and the app
+generates the mermaid source, renders it live, and exports it as `.mmd`, `.html` or
+`.svg`.
+
+Eleven diagram types, all rendered by Mermaid 12.
+
+## Requirements
+
+- Python 3.14 (see `.python-version`)
+- A desktop session — this is a Qt application
+- Network access for the live preview, which loads mermaid from jsdelivr.
+  Everything else, including all exports, works offline.
+
+The embedded preview needs QtWebEngine, which in turn needs a few system
+libraries. On Debian or Ubuntu:
+
+```bash
+sudo apt install libasound2t64 libxcomposite1 libxdamage1 libxrandr2 libxtst6 libxfixes3
+```
+
+Without them the app still starts: the preview pane explains what is missing and
+offers to open the diagram in your browser instead.
+
+## Install and run
+
+```bash
+uv sync
+uv run diagram-maker
+```
+
+## Diagram types
+
+| Type | Key | What it draws |
+| --- | --- | --- |
+| Flowchart | `flowchart` | Nodes, shaped boxes, subgraphs, labelled edges |
+| Sequence | `sequence` | Participants, messages, notes |
+| Class | `class` | UML classes, attributes, methods, relations |
+| Entity relationship | `er` | Entities, columns, cardinality |
+| Use case | `usecase` | Actors, use cases, system boundaries, include/extend |
+| Mindmap | `mindmap` | Indented tree (level 1 is the root) |
+| Gantt | `gantt` | Sections, tasks, dependencies, milestones |
+| Timeline | `timeline` | Sections and dated events |
+| Pie chart | `pie` | Slices with values |
+| Quadrant chart | `quadrant` | Points on two axes, four labelled quadrants |
+| XY chart | `xychart` | Bar and line series over categories |
+
+Every type shares the same options: a title, a mermaid theme and a
+`classic` / `neo` / `handDrawn` look.
+
+## Using it
+
+The window has three parts:
+
+- **Structure** (left) — the diagram type picker, then one group per element
+  collection (Nodes, Edges, ...). Use the buttons underneath or the Edit menu to
+  add, duplicate, reorder and remove elements. Double-click a group to add to it.
+- **Properties** (right) — the fields of whatever is selected. "Diagram settings"
+  at the top of the tree holds the whole-diagram options.
+- **Preview** (centre) — the rendered diagram, redrawn as you type.
+- **Mermaid source** (bottom) — the generated code, read-only. The visual editor
+  is the only editor; this pane is for reading, copying and sanity-checking.
+
+If an element cannot be drawn — a node without an id, an edge pointing at a node
+that does not exist, a gantt task with no start date — it is left out and a
+warning appears above the source pane. The rest of the diagram still renders.
+
+If mermaid itself rejects the generated source, the preview shows a dismissible
+red banner with the parse error and the offending line, and the status bar
+repeats it. Dismissing hides the message until the next failed render; the rest
+of the diagram and every export stay usable.
+
+### Keyboard shortcuts
+
+| Shortcut | Action |
+| --- | --- |
+| `Ctrl+N` / `Ctrl+O` / `Ctrl+S` | New / open / save |
+| `Ctrl+Return` | Add an element |
+| `Ctrl+D` | Duplicate the selected element |
+| `Del` | Remove the selected element |
+| `Alt+Up` / `Alt+Down` | Move an element within its group |
+| `Ctrl+E` | Export mermaid (`.mmd`) |
+| `Ctrl+Shift+E` | Export HTML |
+| `Ctrl+Alt+S` | Export SVG |
+| `F5` | Redraw the preview |
+| `Ctrl+Shift+C` | Copy the mermaid source |
+
+## Files
+
+| Format | Contents |
+| --- | --- |
+| `*.diagram.json` | The document: diagram type, options and every element. This is what Save writes. |
+| `*.mmd` | Just the generated mermaid source. |
+| `*.html` | A standalone page that renders the diagram with mermaid from a CDN. |
+| `*.svg` | The rendered picture, taken from the preview. |
+
+## Command line
+
+```bash
+uv run diagram-maker                       # start with a sample flowchart
+uv run diagram-maker my.diagram.json       # open a saved document
+uv run diagram-maker --sample usecase      # start from the use case sample
+uv run diagram-maker --export out.mmd      # write mermaid and exit, no GUI
+uv run diagram-maker --list                # list the diagram types
+```
+
+## How it fits together
+
+```
+src/diagram_maker/
+    specs.py       one DiagramSpec per diagram type: options, sections, fields
+    document.py    DiagramDocument - plain-data document plus samples
+    generators.py  document -> mermaid source, with per-row warnings
+    preview.py     QtWebEngine preview page, and the browser fallback
+    window.py      the main window, built from the specs
+    __init__.py    main() and the headless CLI
+```
+
+`specs.py` is the single source of truth. The property forms in `window.py` are
+generated from it and `generators.py` reads the same definitions, so a diagram
+type is never described twice. Adding a type means adding one `DiagramSpec`, one
+generator function and one sample.
+
+## Development
+
+```bash
+uv run python scripts/smoke_test.py     # drives the whole UI offscreen, all types
+uv run python scripts/render_check.py   # writes build/render_check.html
+uv run python scripts/edge_check.py     # writes build/edge_check.html
+```
+
+Serve `build/` over HTTP before opening the generated pages: the VS Code browser
+refuses `file://` URLs outside a trusted folder.
+
+`smoke_test.py` switches through every diagram type, builds a property form for
+every element, exercises add/duplicate/reorder/remove, checks the preview and the
+SVG export, feeds it a deliberately broken diagram, and round-trips a save and
+load. It passes in either preview mode.
+
+`render_check.py` writes a page that renders every sample with real mermaid, so
+you can confirm the generated syntax is still valid — including the newest
+diagram types, which the docs describe before most people have used them.
+
+`edge_check.py` does the same for awkward-but-plausible input: colons in task
+names, spaces in entity names, quotes inside labels, braces inside columns. Every
+case there failed at least once during development, so it is the regression net
+for the generators.
+
+## Notes
+
+- Mermaid is pinned to `12.0.0` in `preview.py` and `render_check.py` so a new
+  mermaid release cannot silently change how existing documents render. The use
+  case diagram type needs 12.x: it is the `usecase-beta` keyword.
+- `pyqt6-tools` is deliberately **not** a dependency. It is abandoned, pins
+  `pyqt6==6.4.2`, and pulls `pyqt6-plugins`, which only ships wheels up to
+  CPython 3.11 — so it can never resolve on Python 3.12+. Use PyQt6's own
+  compiler for `.ui` files: `python -m PyQt6.uic.pyuic -o form.py form.ui`.
+  For the Qt Designer GUI, install the optional extra: `uv sync --extra designer`.
+- The app depends only on PyQt6, PyQt6-WebEngine and the Python standard library.
+  There is no data-wrangling or plotting dependency.
