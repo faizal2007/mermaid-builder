@@ -120,6 +120,8 @@ class MainWindow(QMainWindow):
         self._loading = False
         self._dirty = False
         self._result = Result(code="")
+        #: what a double click in the preview pointed at, until it is written
+        self._editing: tuple[str, int, str] | None = None
 
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(app_icon())
@@ -135,6 +137,8 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         self.preview = PreviewPane(self)
         self.preview.rendered.connect(self._on_rendered)
+        self.preview.edit_requested.connect(self._edit_label)
+        self.preview.edit_committed.connect(self._write_label)
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         splitter.addWidget(self.preview)
@@ -404,6 +408,38 @@ class MainWindow(QMainWindow):
             )
         else:
             self.statusBar().showMessage(f"Preview problem: {message[:200]}")
+
+    # -------------------------------------------------------------- editing #
+
+    def _edit_label(self, element_id: str, text: str) -> None:
+        """A label in the preview was double clicked: edit it where it sits.
+
+        The element is selected as well, so the tree and the property form show
+        where the text lives while it is being changed.
+        """
+        found = self.document.find_text(element_id, text)
+        if found is None:
+            self.statusBar().showMessage(
+                f"Nothing to edit there - {text!r} is not drawn from an element", 4000
+            )
+            return
+        section_key, index, field = found
+        self._editing = found
+        self._rebuild_tree(select=(section_key, index))
+        self.preview.edit_text(str(self.document.rows(section_key)[index].get(field, "")))
+
+    def _write_label(self, text: str) -> None:
+        """Keep what was typed over a label, and redraw."""
+        if self._editing is None:
+            return
+        section_key, index, field = self._editing
+        rows = self.document.rows(section_key)
+        if not (0 <= index < len(rows)) or str(rows[index].get(field, "")) == text:
+            return
+        rows[index][field] = text
+        self._mark_modified()
+        self._rebuild_tree(select=(section_key, index))
+        self._schedule_update()
 
     # ------------------------------------------------------------- tree view #
 

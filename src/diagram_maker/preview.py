@@ -13,6 +13,9 @@ Title protocol (set by the page, read by :class:`PreviewPane`):
 ``mermaid:ok``          the diagram rendered
 ``mermaid:error:<msg>`` rendering failed, ``<msg>`` is the parse error
 ``mermaid:offline``     the mermaid bundle could not be fetched from the CDN
+``mermaid:edit:<json>`` a label was double clicked; ``<json>`` is the id and
+                        text of what was hit, percent encoded
+``mermaid:edit-commit:``the text typed over that label, percent encoded
 ======================  ====================================================
 """
 
@@ -22,6 +25,7 @@ import html
 import json
 import tempfile
 from pathlib import Path
+from urllib.parse import unquote
 
 from PyQt6.QtCore import Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
@@ -98,9 +102,22 @@ _PAGE = """<!doctype html>
     background: transparent;
     color: inherit;
   }
-  #stage { flex: 1 1 auto; overflow: auto; padding: 16px; }
+  #stage { flex: 1 1 auto; overflow: auto; padding: 16px; position: relative; }
   #stage svg { max-width: 100%%; height: auto; }
   #empty { color: #8a8f98; }
+  #label-editor {
+    position: absolute;
+    z-index: 10;
+    display: none;
+    margin: 0;
+    padding: 1px 4px;
+    border: 2px solid #4c8bf5;
+    border-radius: 3px;
+    background: #ffffff;
+    color: #1f2328;
+    text-align: center;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  }
 </style>
 </head>
 <body>
@@ -142,6 +159,106 @@ function clearStrayNodes() {
   }
 }
 
+// ---------------------------------------------------------------- editing # //
+// Double clicking a label edits it where it sits.  The page only says what was
+// clicked: Python decides which element that is and hands back the text to put
+// in the box, so the document - not the rendered, possibly reformatted string -
+// is what gets edited.
+
+const labelEditor = document.createElement('input');
+labelEditor.id = 'label-editor';
+labelEditor.type = 'text';
+labelEditor.spellcheck = false;
+
+let editTarget = null;
+
+function closeEditor() {
+  labelEditor.style.display = 'none';
+  editTarget = null;
+}
+
+// The editor lives inside the stage, and is placed against the stage's own
+// coordinates, so scrolling the diagram moves the box with the label it sits
+// on.  Redrawing the stage takes the box with it, which is why it is mounted
+// again after every render - and why a redraw closes the edit: the label it
+// pointed at no longer exists.
+function placeEditor() {
+  if (!editTarget) return;
+  if (!editTarget.isConnected) {
+    closeEditor();
+    return;
+  }
+  const box = editTarget.getBoundingClientRect();
+  const host = stage.getBoundingClientRect();
+  const style = getComputedStyle(editTarget);
+  const size = parseFloat(style.fontSize) || 14;
+  labelEditor.style.font = size + 'px/1.3 ' + (style.fontFamily || 'sans-serif');
+  labelEditor.style.left = (box.left - host.left + stage.scrollLeft) + 'px';
+  labelEditor.style.top = (box.top - host.top + stage.scrollTop) + 'px';
+  labelEditor.style.width = Math.max(box.width + 24, 90) + 'px';
+  labelEditor.style.height = Math.max(box.height + 8, 24) + 'px';
+}
+
+function mountEditor() {
+  if (labelEditor.parentElement !== stage) stage.appendChild(labelEditor);
+  placeEditor();
+}
+
+window.showLabelEditor = function (text) {
+  if (!editTarget) return;
+  labelEditor.value = text;
+  labelEditor.style.display = 'block';
+  placeEditor();
+  labelEditor.focus();
+  labelEditor.select();
+};
+
+labelEditor.addEventListener('keydown', function (event) {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    const typed = labelEditor.value;
+    closeEditor();
+    setTitle('edit-commit', encodeURIComponent(typed));
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    closeEditor();
+  }
+});
+// focus going elsewhere means the edit was abandoned, not confirmed
+labelEditor.addEventListener('blur', closeEditor);
+// the stage is resized under the editor whenever a dock opens or the window
+// changes size, and the diagram is scaled to fit it, so the label moves
+new ResizeObserver(placeEditor).observe(stage);
+
+// The label under the pointer is the nearest text beneath it, and the element
+// that owns it is the nearest ancestor mermaid gave an id or a data-id to.  The
+// svg itself carries an id, but it names the render, not an element.
+function labelUnder(node) {
+  let holder = null;
+  let owner = null;
+  while (node && node !== stage && (!holder || !owner)) {
+    if (!holder) {
+      holder = (node.textContent || '').trim() ? node
+        : node.querySelector('text, p, tspan');
+    }
+    if (!owner && node.id && node.tagName.toLowerCase() !== 'svg') owner = node;
+    node = node.parentElement;
+  }
+  return { holder: holder, owner: owner };
+}
+
+stage.addEventListener('dblclick', function (event) {
+  const found = labelUnder(event.target);
+  if (!found.holder) return;
+  const text = (found.holder.textContent || '').replace(/\\s+/g, ' ').trim();
+  if (!text) return;
+  const owner = found.owner;
+  const id = owner ? (owner.getAttribute('data-id') || owner.id || '') : '';
+  editTarget = found.holder;
+  event.preventDefault();
+  setTitle('edit', encodeURIComponent(JSON.stringify({ id: id, text: text })));
+}, true);
+
 window.__svg = '';
 
 if (typeof mermaid === 'undefined' || window.__cdnFailed) {
@@ -155,6 +272,7 @@ if (typeof mermaid === 'undefined' || window.__cdnFailed) {
     if (!code || !code.trim()) {
       stage.innerHTML = '<p id="empty">Nothing to draw yet.</p>';
       window.__svg = '';
+      mountEditor();
       showBanner('', '');
       setTitle('ok');
       clearStrayNodes();
@@ -166,6 +284,7 @@ if (typeof mermaid === 'undefined' || window.__cdnFailed) {
       const { svg } = await mermaid.render(id, code);
       stage.innerHTML = svg;
       window.__svg = svg;
+      mountEditor();
       showBanner('', '');
       setTitle('ok');
     } catch (err) {
@@ -198,6 +317,12 @@ class PreviewPane(QWidget):
 
     #: ``(ok, message)`` - emitted after every render attempt
     rendered = pyqtSignal(bool, str)
+
+    #: ``(element_id, text)`` - a label in the diagram was double clicked
+    edit_requested = pyqtSignal(str, str)
+
+    #: the text typed over the label the window was last asked about
+    edit_committed = pyqtSignal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -265,6 +390,21 @@ class PreviewPane(QWidget):
             self.rendered.emit(False, detail or "mermaid could not draw this diagram")
         elif status == "offline":
             self.rendered.emit(False, "mermaid could not be loaded from the CDN")
+        elif status == "edit":
+            self._on_edit_requested(detail)
+        elif status == "edit-commit":
+            self.edit_committed.emit(unquote(detail))
+
+    def _on_edit_requested(self, detail: str) -> None:
+        """Report the label a double click landed on, as ``(id, text)``."""
+        try:
+            clicked = json.loads(unquote(detail))
+        except ValueError:
+            return
+        if isinstance(clicked, dict):
+            self.edit_requested.emit(
+                str(clicked.get("id", "")), str(clicked.get("text", ""))
+            )
 
     # -- public API -------------------------------------------------------- #
 
@@ -334,6 +474,17 @@ class PreviewPane(QWidget):
             receive(None)
             return
         self._view.page().runJavaScript(script, receive)
+
+    def edit_text(self, text: str) -> None:
+        """Open the editor over the label that was double clicked.
+
+        Called with the text the *document* holds, which is not necessarily what
+        the diagram shows: mermaid reformats labels, and editing the rendered
+        version of one would lose the original.
+        """
+        if self._view is None:
+            return
+        self._view.page().runJavaScript(f"window.showLabelEditor({json.dumps(text)});")
 
     def svg(self, callback) -> None:
         """Hand the last rendered SVG to ``callback`` (called on the GUI thread)."""

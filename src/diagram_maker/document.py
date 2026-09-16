@@ -93,6 +93,44 @@ class DiagramDocument:
             for index, row in enumerate(self.rows(section.key)):
                 yield section, index, row
 
+    def find_text(self, element_id: str, text: str) -> tuple[str, int, str] | None:
+        """The row and field a double click on ``text`` in the preview refers to.
+
+        Mermaid names what it draws after the ids it was handed, as
+        ``diagram-0-flowchart-Ship-0``, so an id carrying a row's id is the
+        strongest evidence - and the only thing that works when the drawn text
+        has been reformatted.  Where mermaid offers no id at all (mindmaps,
+        charts, gantt bars) the drawn text is matched against the field each
+        section declares in :attr:`~diagram_maker.specs.ItemSpec.text_field`.
+
+        Returns ``(section, index, field)``, or ``None`` when the click belongs
+        to nothing that can be edited.
+        """
+        # the numbers mermaid adds are its own; a row id that is a number would
+        # match every element on the page
+        parts = {
+            part for part in (element_id or "").split("-") if part and not part.isdigit()
+        }
+        if parts:
+            for section in self.spec.sections:
+                if not (section.id_field and section.text_field):
+                    continue
+                for index, row in enumerate(self.rows(section.key)):
+                    if str(row.get(section.id_field, "")) in parts:
+                        return section.key, index, section.text_field
+
+        wanted = " ".join((text or "").split())
+        if not wanted:
+            return None
+        for section in self.spec.sections:
+            if not section.text_field:
+                continue
+            for index, row in enumerate(self.rows(section.key)):
+                drawn = " ".join(str(row.get(section.text_field, "")).split())
+                if drawn and drawn == wanted:
+                    return section.key, index, section.text_field
+        return None
+
     def set_kind(self, kind: str) -> None:
         """Switch diagram type.
 

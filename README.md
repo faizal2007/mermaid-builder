@@ -59,7 +59,12 @@ The window has three parts:
   add, duplicate, reorder and remove elements. Double-click a group to add to it.
 - **Properties** (right) — the fields of whatever is selected. "Diagram settings"
   at the top of the tree holds the whole-diagram options.
-- **Preview** (centre) — the rendered diagram, redrawn as you type.
+- **Preview** (centre) — the rendered diagram, redrawn as you type. Double-click
+  any label to edit it where it sits: the box opens over the text, Enter keeps
+  the change, Escape or clicking away drops it, and the element is selected in
+  the tree meanwhile. Mermaid names most of what it draws after the ids it was
+  given, so a click is matched to an element by id first and by the text it
+  draws second — which covers the mindmaps and charts that carry no ids.
 - **Mermaid source** (bottom) — the generated code, read-only. The visual editor
   is the only editor; this pane is for reading, copying and sanity-checking.
 

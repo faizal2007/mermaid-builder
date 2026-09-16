@@ -99,6 +99,11 @@ class ItemSpec:
     fields: tuple[Field, ...]
     summary: tuple[str, ...] = ()
     tip: str = ""
+    #: the field whose value the preview draws for this element, and the field
+    #: mermaid builds the element's id from.  Together they are how a double
+    #: click on a label finds the row it belongs to; empty means it cannot.
+    text_field: str = ""
+    id_field: str = ""
 
     def blank(self) -> dict[str, Any]:
         return {f.name: f.default for f in self.fields}
@@ -187,6 +192,8 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
                 label="Nodes",
                 singular="Node",
                 summary=("id", "label"),
+                text_field="label",
+                id_field="id",
                 tip="Ids must be unique. Letters, digits and underscore only.",
                 fields=(
                     _f("id", "Id", TEXT, "", placeholder="A"),
@@ -228,6 +235,7 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
                 label="Edges",
                 singular="Edge",
                 summary=("source", "label", "target"),
+                text_field="label",
                 tip="Reference node ids declared above.",
                 fields=(
                     _f("source", "From", TEXT, "", placeholder="A"),
@@ -252,6 +260,8 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
                 key="participants",
                 label="Participants",
                 singular="Participant",
+                text_field="label",
+                id_field="alias",
                 summary=("alias", "label"),
                 fields=(
                     _f("alias", "Id", TEXT, "", placeholder="A"),
@@ -261,6 +271,7 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
             ),
             ItemSpec(
                 key="messages",
+                text_field="text",
                 label="Messages",
                 singular="Message",
                 summary=("sender", "text", "receiver"),
@@ -291,6 +302,7 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
                 label="Notes",
                 singular="Note",
                 summary=("text",),
+                text_field="text",
                 fields=(
                     _f("text", "Text", TEXT, ""),
                     _f(
@@ -320,6 +332,8 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
                 label="Classes",
                 singular="Class",
                 summary=("name",),
+                text_field="name",
+                id_field="name",
                 tip="One attribute or method per line, e.g. '+name : String'.",
                 fields=(
                     _f("name", "Name", TEXT, "", placeholder="Animal"),
@@ -337,6 +351,7 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
             ItemSpec(
                 key="relations",
                 label="Relations",
+                text_field="label",
                 singular="Relation",
                 summary=("source", "kind", "target"),
                 fields=(
@@ -373,6 +388,8 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
         sections=(
             ItemSpec(
                 key="entities",
+                text_field="name",
+                id_field="name",
                 label="Entities",
                 singular="Entity",
                 summary=("name",),
@@ -384,6 +401,7 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
             ),
             ItemSpec(
                 key="relations",
+                text_field="label",
                 label="Relationships",
                 singular="Relationship",
                 summary=("left", "cardinality", "right"),
@@ -429,6 +447,8 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
                 label="System boundaries",
                 singular="Boundary",
                 summary=("title",),
+                text_field="title",
+                id_field="id",
                 fields=(
                     _f("id", "Id", TEXT, "", placeholder="ordering"),
                     _f("title", "Title", TEXT, "", placeholder="Ordering system"),
@@ -440,6 +460,8 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
                 label="Actors",
                 singular="Actor",
                 summary=("id", "label"),
+                text_field="label",
+                id_field="id",
                 fields=(
                     _f("id", "Id", TEXT, "", placeholder="Customer"),
                     _f("label", "Display name", TEXT, "", placeholder="Customer"),
@@ -460,6 +482,8 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
                 label="Use cases",
                 singular="Use case",
                 summary=("id", "label"),
+                text_field="label",
+                id_field="id",
                 fields=(
                     _f("id", "Id", TEXT, "", placeholder="Checkout"),
                     _f("label", "Display name", TEXT, "", placeholder="Checkout"),
@@ -481,6 +505,7 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
                 label="Relationships",
                 singular="Relationship",
                 summary=("source", "kind", "target"),
+                text_field="label",
                 tip="Include/extend need use case endpoints; generalization two of a kind.",
                 fields=(
                     _f("source", "From", TEXT, ""),
@@ -506,6 +531,7 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
             ),
             ItemSpec(
                 key="notes",
+                text_field="text",
                 label="Notes",
                 singular="Note",
                 summary=("target", "text"),
@@ -528,6 +554,7 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
                 label="Branches",
                 singular="Branch",
                 summary=("label",),
+                text_field="label",
                 tip="Level 1 is the root, level 2 the first ring, and so on.",
                 fields=(
                     _f("level", "Level", INT, 1, minimum=1, maximum=8),
@@ -569,6 +596,8 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
                 label="Tasks",
                 singular="Task",
                 summary=("name", "start", "duration"),
+                text_field="name",
+                id_field="id",
                 tip="Start is a date in the chosen format, or 'after <task id>'.",
                 fields=(
                     _f("section", "Section", TEXT, "", placeholder="optional group"),
@@ -599,6 +628,7 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
                 label="Events",
                 singular="Event",
                 summary=("period", "text"),
+                text_field="text",
                 tip="Events with the same section are grouped together.",
                 fields=(
                     _f("section", "Section", TEXT, "", placeholder="optional group"),
@@ -623,6 +653,7 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
                 label="Slices",
                 singular="Slice",
                 summary=("label", "value"),
+                text_field="label",
                 fields=(
                     _f("label", "Label", TEXT, ""),
                     _f("value", "Value", FLOAT, 1, minimum=0, maximum=1_000_000, step=1),
@@ -650,6 +681,7 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
                 key="points",
                 label="Points",
                 singular="Point",
+                text_field="name",
                 summary=("name",),
                 tip="X and Y are normalised: 0 = low end of the axis, 1 = high end.",
                 fields=(
@@ -675,6 +707,7 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
             ItemSpec(
                 key="series",
                 label="Series",
+                text_field="name",
                 singular="Series",
                 summary=("name", "kind"),
                 tip="Provide one value per category, separated by commas.",

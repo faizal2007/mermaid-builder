@@ -239,6 +239,51 @@ def main() -> int:
 
         rows[0]["style"] = original
 
+    print("checking that a click in the diagram finds the element it drew\n")
+    flowchart = sample("flowchart")
+    found = flowchart.find_text("diagram-0-flowchart-Ship-0", "Ship order")
+    check(found is not None and found[0] == "nodes", f"a node id did not resolve: {found}")
+    check(
+        found is not None and flowchart.rows("nodes")[found[1]]["id"] == "Ship",
+        f"a node id resolved to the wrong row: {found}",
+    )
+    check(
+        flowchart.find_text("diagram-0-flowchart-2-0", "") is None,
+        "mermaid's own numbering was taken for an element id",
+    )
+    # the id wins: mermaid may have reformatted the text, but not the id
+    mixed = flowchart.find_text("diagram-0-flowchart-Ship-0", "Order received")
+    check(
+        mixed is not None and flowchart.rows("nodes")[mixed[1]]["id"] == "Ship",
+        f"rendered text overrode the id it sat in: {mixed}",
+    )
+    # edges are drawn without an id of their own, so the text has to find them
+    edge = flowchart.find_text("", "yes")
+    check(edge is not None and edge[0] == "edges", f"an edge label did not resolve: {edge}")
+    # a mindmap invents its own ids, so again only the text can match
+    branch = sample("mindmap").find_text("diagram-5-node_2", "Forms")
+    check(
+        branch is not None and branch[0] == "nodes" and branch[2] == "label",
+        f"a mindmap branch did not resolve: {branch}",
+    )
+    check(
+        flowchart.find_text("", "nothing here draws this") is None,
+        "text that is not in the diagram resolved to an element",
+    )
+
+    sections = [(key, section) for key in SPEC_ORDER for section in SPECS[key].sections]
+    check(
+        all(section.text_field for _, section in sections),
+        "some section cannot be found by clicking the text it draws",
+    )
+    wrong = [
+        f"{key}.{section.key}"
+        for key, section in sections
+        if section.text_field not in [f.name for f in section.fields]
+        or (section.id_field and section.id_field not in [f.name for f in section.fields])
+    ]
+    check(not wrong, f"these sections name fields they do not have: {wrong}")
+
     renders: list[tuple[bool, str]] = []
     window.preview.rendered.connect(lambda ok, message: renders.append((ok, message)))
 
@@ -285,6 +330,92 @@ def main() -> int:
               f"{len(renders)} preview update(s)")
 
     if has_webengine:
+        print("\nchecking that a double click on a label edits it where it sits")
+        window.type_combo.setCurrentIndex(SPEC_ORDER.index("flowchart"))
+        application.processEvents()
+        settle(SETTLE_MS)
+        application.processEvents()
+
+        rows = window.document.rows("nodes")
+        ship = next((i for i, row in enumerate(rows) if row.get("id") == "Ship"), None)
+        check(ship is not None, "the flowchart sample has no Ship node to click")
+
+        if ship is not None:
+            # double click the label in the page rather than calling the handler
+            clicked = evaluate(
+                window,
+                "(() => {"
+                "  const node = document.querySelector('[id$=\"-flowchart-Ship-0\"]');"
+                "  if (!node) return 'no node with that id';"
+                "  const label = node.querySelector('p, text, tspan') || node;"
+                "  label.dispatchEvent(new MouseEvent('dblclick', {bubbles: true}));"
+                "  return (label.textContent || '').trim();"
+                "})()",
+            )
+            check(clicked == "Ship order", f"the diagram shows {clicked!r}, not 'Ship order'")
+
+            editor = evaluate(
+                window,
+                "(() => { const box = document.getElementById('label-editor');"
+                " return box ? [box.style.display, box.value] : null; })()",
+            )
+            check(
+                isinstance(editor, list) and editor[0] == "block",
+                f"no editor opened over the label: {editor}",
+            )
+            check(
+                isinstance(editor, list) and editor[1] == "Ship order",
+                f"the editor opened holding {editor}, not the document's text",
+            )
+            current = window.tree.currentItem()
+            check(
+                current is not None and current.text(0).startswith("Ship"),
+                "the element the label belongs to was not selected: "
+                f"{current.text(0) if current is not None else 'nothing'}",
+            )
+
+            # the box has to sit over the label, not somewhere else on the page
+            over = evaluate(
+                window,
+                "(() => { const box = document.getElementById('label-editor');"
+                "  const label = document.querySelector('[id$=\"-flowchart-Ship-0\"] p');"
+                "  if (!box || !label) return 'no box or no label';"
+                "  const a = box.getBoundingClientRect();"
+                "  const b = label.getBoundingClientRect();"
+                "  const covers = Math.abs(a.left - b.left) < 8"
+                "      && Math.abs(a.top - b.top) < 8"
+                "      && a.width >= b.width && a.height >= b.height;"
+                "  return covers ? 'over'"
+                "    : 'box ' + JSON.stringify([a.left, a.top, a.width, a.height])"
+                "      + ' label ' + JSON.stringify([b.left, b.top, b.width, b.height]); })()",
+            )
+            check(over == "over", f"the editor did not land over the label: {over}")
+
+            # typing over it and pressing Enter is what keeps the change
+            display = evaluate(
+                window,
+                "(() => { const box = document.getElementById('label-editor');"
+                "  box.value = 'Shipped order';"
+                "  box.dispatchEvent("
+                "    new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));"
+                "  return box.style.display; })()",
+            )
+            settle(SETTLE_MS)
+            application.processEvents()
+            check(display == "none", f"the editor stayed open after Enter: {display!r}")
+            check(
+                rows[ship].get("label") == "Shipped order",
+                f"the typed text did not reach the document: {rows[ship].get('label')!r}",
+            )
+            check(
+                "Shipped order" in generate(window.document).code,
+                "the regenerated mermaid does not carry the new text",
+            )
+
+            # put the sample back, for the checks that follow
+            rows[ship]["label"] = "Ship order"
+            window._schedule_update(immediate=True)
+
         print("\nchecking the SVG export, which reads the picture back out of the page")
         svg_path = Path(tempfile.gettempdir()) / "diagram-maker-smoke.svg"
         outcome: dict[str, object] = {}
