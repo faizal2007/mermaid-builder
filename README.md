@@ -115,6 +115,7 @@ src/diagram_maker/
     generators.py  document -> mermaid source, with per-row warnings
     preview.py     QtWebEngine preview page, and the browser fallback
     window.py      the main window, built from the specs
+    icon.ico       the window and taskbar icon, drawn by packaging/make_icon.py
     __init__.py    main() and the headless CLI
 ```
 
@@ -148,6 +149,51 @@ names, spaces in entity names, quotes inside labels, braces inside columns. Ever
 case there failed at least once during development, so it is the regression net
 for the generators.
 
+## Windows installer
+
+`scripts/build_installer.py` freezes the application with PyInstaller and wraps
+it in an Inno Setup installer:
+
+```powershell
+uv sync --extra packaging
+uv run python scripts/build_installer.py
+```
+
+It takes the version from `pyproject.toml` and then works through:
+
+| Step | Result |
+| --- | --- |
+| icon | `src/diagram_maker/icon.ico`, drawn by `packaging/make_icon.py` if it is missing |
+| freeze | `packaging/diagram-maker.spec` into `dist\Diagram Maker\` - about 430 MB, most of it QtWebEngine |
+| checks | the frozen `.exe` writes a diagram through `--export`, then survives 12 s offscreen with a real window and preview |
+| installer | `packaging/diagram-maker.iss` into `dist\DiagramMaker-<version>-setup.exe` - about 120 MB |
+
+Flags worth knowing: `--skip-freeze` recompiles the installer around the bundle
+already in `dist\`, `--console` produces a console build when a frozen app is
+misbehaving, `--no-run` skips the two startup checks, and `--zip` also writes
+`dist\DiagramMaker-<version>-portable-x64.zip`.
+
+What the installer sets up:
+
+- installs to `%LOCALAPPDATA%\Programs\Diagram Maker` without needing an
+  administrator; the choice on the first page elevates and uses Program Files
+  for all users instead
+- a Start menu entry, plus a desktop shortcut if that task is ticked
+- an optional `.diagram.json` association, unticked by default
+- an uninstaller in Apps and features
+
+Inno Setup is the only outside tool needed. `winget install -e --id JRSoftware.InnoSetup`
+installs it; without it the build stops after the portable zip and says so.
+
+The bundles are unsigned, so SmartScreen warns before the installer runs and
+Smart App Control refuses to run it at all. Sign the frozen app first if you
+have a certificate, so the payload carries its signature too:
+
+```powershell
+signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "dist\Diagram Maker\Diagram Maker.exe"
+# then build the installer
+```
+
 ## Notes
 
 - Mermaid is pinned to `12.0.0` in `preview.py` and `render_check.py` so a new
@@ -159,4 +205,12 @@ for the generators.
   compiler for `.ui` files: `python -m PyQt6.uic.pyuic -o form.py form.ui`.
   For the Qt Designer GUI, install the optional extra: `uv sync --extra designer`.
 - The app depends only on PyQt6, PyQt6-WebEngine and the Python standard library.
-  There is no data-wrangling or plotting dependency.
+  There is no data-wrangling or plotting dependency. PyInstaller arrives through
+  the `packaging` extra but only ever runs on the build machine.
+- The application folder is a onedir build rather than a single file: a onefile
+  build unpacks the whole QtWebEngine stack next to the `.exe` on every start.
+- `packaging/make_icon.py` draws `src/diagram_maker/icon.ico` from nothing but
+  the standard library, because every shape is a signed distance function
+  rasterised per size. Run it with `--preview build/icon-preview.png` to look at
+  the result before shipping it. The window loads that file at run time, which
+  is what the taskbar draws, and the build embeds the same file in the `.exe`.

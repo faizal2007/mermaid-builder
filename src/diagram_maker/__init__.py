@@ -110,7 +110,7 @@ def main() -> None:
     from PyQt6.QtWidgets import QApplication
 
     from .preview import WEBENGINE_ERROR
-    from .window import APP_NAME, MainWindow
+    from .window import APP_NAME, MainWindow, app_icon
 
     if WEBENGINE_ERROR is not None:
         print(f"note: no embedded preview ({WEBENGINE_ERROR})", file=sys.stderr)
@@ -118,6 +118,8 @@ def main() -> None:
     application = QApplication(sys.argv)
     application.setApplicationName(APP_NAME)
     application.setApplicationVersion(__version__)
+    # dialogs take this too, and it is what the taskbar draws
+    application.setWindowIcon(app_icon())
 
     document = None
     path = None

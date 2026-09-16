@@ -21,6 +21,11 @@ dependencies = [
 designer = [
     'pyside6'
 ]
+# Build-time only, for scripts/build_installer.py. The frozen app itself still
+# needs nothing but PyQt6 and the standard library.
+packaging = [
+    "pyinstaller>=6.22.3",
+]
 
 [project.scripts]
 diagram-maker = "diagram_maker:main"

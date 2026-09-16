@@ -9,10 +9,11 @@ mermaid source and redraws the preview.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QAction, QKeySequence
+from PyQt6.QtGui import QAction, QIcon, QKeySequence
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -45,6 +46,9 @@ from .specs import BOOL, CHOICE, FLOAT, INT, LINES, SPECS, SPEC_ORDER, Field
 
 APP_NAME = "Diagram Maker"
 
+#: drawn by ``packaging/make_icon.py``, and embedded in the .exe as well
+ICON_FILE = "icon.ico"
+
 #: how long to wait after the last keystroke before regenerating
 DEBOUNCE_MS = 250
 
@@ -58,6 +62,23 @@ _KIND_SECTION = "section"
 _KIND_ITEM = "item"
 
 
+def icon_path() -> Path:
+    """The icon file: beside this module, or in the root of a frozen bundle."""
+    if (base := getattr(sys, "_MEIPASS", None)) is not None:
+        return Path(base) / ICON_FILE
+    return Path(__file__).resolve().parent / ICON_FILE
+
+
+def app_icon() -> QIcon:
+    """The window and taskbar icon.
+
+    Worth setting explicitly: without it the taskbar button has no icon of its
+    own, and Windows leaves the space blank even though the .exe carries one.
+    """
+    path = icon_path()
+    return QIcon(str(path)) if path.is_file() else QIcon()
+
+
 class MainWindow(QMainWindow):
     def __init__(self, document: DiagramDocument | None = None, path: Path | None = None):
         super().__init__()
@@ -68,6 +89,7 @@ class MainWindow(QMainWindow):
         self._result = Result(code="")
 
         self.setWindowTitle(APP_NAME)
+        self.setWindowIcon(app_icon())
         self.resize(1280, 840)
 
         self._build_ui()

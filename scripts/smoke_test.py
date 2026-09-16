@@ -33,7 +33,7 @@ from diagram_maker.document import DiagramDocument, sample  # noqa: E402
 from diagram_maker.generators import generate  # noqa: E402
 from diagram_maker.preview import WEBENGINE_ERROR  # noqa: E402
 from diagram_maker.specs import SPECS, SPEC_ORDER  # noqa: E402
-from diagram_maker.window import MainWindow  # noqa: E402
+from diagram_maker.window import MainWindow, icon_path  # noqa: E402
 
 SETTLE_MS = 2500
 FIRST_SETTLE_MS = 9000
@@ -119,6 +119,12 @@ def main() -> int:
     application = QApplication(sys.argv)
     window = MainWindow(sample("flowchart"))
     window.show()
+
+    print("checking the window icon\n")
+    check(icon_path().is_file(), f"no icon file at {icon_path()}")
+    # the taskbar draws the window's icon, and ignores the one inside the .exe
+    check(not window.windowIcon().isNull(), "the window has no icon, so the taskbar is blank")
+    check(bool(window.windowIcon().availableSizes()), "the icon file holds no images")
 
     renders: list[tuple[bool, str]] = []
     window.preview.rendered.connect(lambda ok, message: renders.append((ok, message)))
