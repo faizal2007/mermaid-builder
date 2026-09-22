@@ -31,6 +31,16 @@ uv sync
 uv run diagram-maker
 ```
 
+On Windows with Smart App Control turned on, `uv run diagram-maker` can fail with
+`An Application Control policy has blocked this file. (os error 4551)`. Nothing is
+wrong with the app: the launcher `uv` writes into `.venv\Scripts` is unsigned, so
+Windows refuses to start it. Run the module instead — that goes through the signed
+interpreter:
+
+```bash
+uv run python -m diagram_maker
+```
+
 ## Diagram types
 
 | Type | Key | What it draws |
