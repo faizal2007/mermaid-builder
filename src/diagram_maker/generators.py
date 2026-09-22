@@ -123,7 +123,9 @@ _QUOTED_TITLE = {"xychart"}
 """Of those, the ones whose title statement must be a quoted string."""
 
 
-def _frontmatter(doc: DiagramDocument, include_title: bool) -> str:
+def _frontmatter(
+    doc: DiagramDocument, include_title: bool, extra: Sequence[str] = ()
+) -> str:
     body: list[str] = []
     title = clean(doc.option("title"))
     if title and include_title:
@@ -134,11 +136,33 @@ def _frontmatter(doc: DiagramDocument, include_title: bool) -> str:
         config.append(f"  theme: {theme}")
     if look := clean(doc.option("look")):
         config.append(f"  look: {look}")
+    config.extend(extra)
     if config:
         body.append("config:")
         body.extend(config)
 
     return "---\n" + "\n".join(body) + "\n---\n" if body else ""
+
+
+#: options that are really mermaid config, as ``kind -> (path, option)``.  A
+#: layer stack asks for a wider label so its bullet lines are not broken in the
+#: middle, which mermaid only lets a diagram say through its config.
+_CONFIG_OPTIONS: dict[str, tuple[str, str]] = {
+    "layers": ("flowchart.wrappingWidth", "width"),
+}
+
+
+def _config_extras(doc: DiagramDocument) -> list[str]:
+    """The mermaid config this document's own options ask for."""
+    found = _CONFIG_OPTIONS.get(doc.kind)
+    if found is None:
+        return []
+    path, option = found
+    value = clean(doc.option(option))
+    if not value or not number(value, 0.0):
+        return []
+    section, _, name = path.partition(".")
+    return [f"  {section}:", f"    {name}: {value}"]
 
 
 def _title_line(doc: DiagramDocument) -> list[str]:
@@ -719,6 +743,144 @@ def _mindmap(doc: DiagramDocument, warn: Callable[[str, int, str], None]) -> str
 
 
 # --------------------------------------------------------------------------- #
+# layer stack
+# --------------------------------------------------------------------------- #
+
+#: a marker a bullet line may already carry, so it is not drawn twice
+_BULLET_MARKER = re.compile(r"^[-*•·–—]\s*")
+
+
+def _html(value: Any) -> str:
+    """Text for a label built out of HTML, escaped for the quoting around it.
+
+    ``#`` and ``"`` would end the mermaid string the label sits in, and the
+    angle brackets and ampersands are what keep text meaning text rather than
+    the markup this generator is adding.
+    """
+    text = clean(value).replace("#", "#35;").replace('"', "#quot;")
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _bullet(value: Any) -> str:
+    """One line of a bullet list, on its own marker."""
+    return "• " + _html(_BULLET_MARKER.sub("", clean(value)))
+
+
+#: A bullet is an element of its own, not a line of one piece of text.  A double
+#: click lands on the nearest element, so bullets separated by ``<br/>`` are all
+#: one target and the page cannot say which of them was clicked; this also left
+#: aligns them the way a bullet list reads, under a centred heading.
+_BULLET = '<div style="text-align:left">'
+
+
+def _label(title: str, heading: str, items: Sequence[str]) -> str:
+    """The label of one box: a title, an optional heading, then its bullets."""
+    parts: list[str] = []
+    if title:
+        parts.append(f"<b>{_html(title)}</b>")
+    if heading:
+        parts.append(f"<i>{_html(heading)}</i>")
+    if items:
+        if parts:
+            parts.append("<hr/>")
+        parts.extend(f"{_BULLET}{_bullet(item)}</div>" for item in items)
+    return "".join(parts)
+
+
+def _unique(name: str, used: set[str]) -> str:
+    """``name``, numbered if a box already answers to it."""
+    if name not in used:
+        used.add(name)
+        return name
+    number = 2
+    while f"{name}_{number}" in used:
+        number += 1
+    numbered = f"{name}_{number}"
+    used.add(numbered)
+    return numbered
+
+
+def _layers(doc: DiagramDocument, warn: Callable[[str, int, str], None]) -> str:
+    direction = clean(doc.option("direction")) or "TD"
+    out = [f"flowchart {direction}"]
+    # a panel lays its columns out across the flow, not along it
+    across = "LR" if direction.upper() in ("TB", "TD", "BT") else "TB"
+
+    # the layers are declared in the order they stack; a column names the layer
+    # it belongs to, so the two sections together say what the diagram holds
+    panels: list[dict[str, Any]] = []
+    index_of: dict[str, int] = {}
+    for index, layer in enumerate(doc.rows("layers")):
+        title = clean(layer.get("title"))
+        if not title:
+            warn("layers", index, "skipped, no title")
+            continue
+        # a repeated title names the first of them, and both are drawn
+        index_of.setdefault(title, len(panels))
+        panels.append({"title": title, "row": index, "columns": []})
+
+    for index, column in enumerate(doc.rows("columns")):
+        owner = clean(column.get("layer"))
+        where = index_of.get(owner)
+        if where is None:
+            # a column is worth more as a panel of its own than as nothing
+            warn(
+                "columns",
+                index,
+                f"layer {owner!r} is not declared, drawn as a panel of its own",
+            )
+            where = len(panels)
+            index_of[owner] = where
+            panels.append({"title": owner or f"Column {index + 1}", "row": -1, "columns": []})
+        panels[where]["columns"].append((index, column))
+
+    used: set[str] = set()
+    ends: list[tuple[str, str]] = []
+    for number, panel in enumerate(panels):
+        title = panel["title"]
+        columns: list[tuple[int, str, str, list[str]]] = []
+        for index, column in panel["columns"]:
+            heading = clean(column.get("title"))
+            items = lines(column.get("items"))
+            if not heading and not items:
+                warn("columns", index, "skipped, neither a heading nor any bullets")
+                continue
+            columns.append((index, heading, _label(heading, "", items), items))
+        if not columns:
+            if panel["row"] >= 0:
+                warn("layers", panel["row"], f"'{title}' skipped, it has no columns")
+            continue
+
+        base = ident(title, f"L{number + 1}")
+        if len(columns) == 1:
+            # one column is the layer itself: its title is the heading
+            _, heading, _, items = columns[0]
+            node = _unique(base, used)
+            out.append(f'    {node}["{_label(title, heading, items)}"]')
+            ends.append((node, node))
+            continue
+
+        group = _unique(f"sg_{base}", used)
+        out.append(f'    subgraph {group}["{_html(title)}"]')
+        out.append(f"        direction {across}")
+        nodes: list[str] = []
+        for position, (_, heading, label, _) in enumerate(columns):
+            # a column without a heading is named by its layer and its place
+            node = _unique(ident(heading, f"{base}_{position + 1}"), used)
+            nodes.append(node)
+            out.append(f'        {node}["{label}"]')
+        out.append("    end")
+        ends.append((nodes[0], nodes[-1]))
+
+    if len(ends) > 1:
+        out.append("")
+    for index in range(len(ends) - 1):
+        out.append(f"    {ends[index][1]} --> {ends[index + 1][0]}")
+
+    return "\n".join(out)
+
+
+# --------------------------------------------------------------------------- #
 # gantt
 # --------------------------------------------------------------------------- #
 
@@ -1044,6 +1206,7 @@ _GENERATORS: dict[str, Callable[[DiagramDocument, Callable[[str, int, str], None
     "er": _er,
     "usecase": _usecase,
     "mindmap": _mindmap,
+    "layers": _layers,
     "gantt": _gantt,
     "timeline": _timeline,
     "pie": _pie,
@@ -1065,7 +1228,11 @@ def generate(doc: DiagramDocument) -> Result:
         warnings.append(Warning(section, index, message))
 
     body = generator(doc, warn)
-    prefix = _frontmatter(doc, include_title=doc.kind not in _NATIVE_TITLE)
+    prefix = _frontmatter(
+        doc,
+        include_title=doc.kind not in _NATIVE_TITLE,
+        extra=_config_extras(doc),
+    )
     return Result(code=prefix + body + "\n", warnings=warnings)
 
 

@@ -609,6 +609,61 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
         ),
     ),
 
+    # ----------------------------------------------------------------- layers
+    DiagramSpec(
+        key="layers",
+        name="Layer stack",
+        blurb="Panels of bullet points, one layer above the next.",
+        options=(
+            _f("direction", "Direction", CHOICE, "TD", choices=DIRECTIONS),
+            _f(
+                "width",
+                "Label width",
+                INT,
+                400,
+                minimum=150,
+                maximum=1500,
+                step=50,
+                tip="How wide a bullet line gets before mermaid wraps it.",
+            ),
+        ),
+        sections=(
+            ItemSpec(
+                key="layers",
+                label="Layers",
+                singular="Layer",
+                summary=("title",),
+                text_field="title",
+                tip="One panel per layer, stacked in the order they are listed.",
+                fields=(
+                    _f("title", "Title", TEXT, "", placeholder="Data Services"),
+                ),
+            ),
+            ItemSpec(
+                key="columns",
+                label="Columns",
+                singular="Column",
+                summary=("layer", "title"),
+                text_field="title",
+                tip="A layer with one column is a single box; give it two or more "
+                "and it becomes a panel with the columns side by side.",
+                fields=(
+                    _f(
+                        "layer",
+                        "In layer",
+                        TEXT,
+                        "",
+                        placeholder="Data Services",
+                        tip="The title of a layer listed above, so renaming that "
+                        "layer means renaming it here too.",
+                    ),
+                    _f("title", "Heading", TEXT, "", placeholder="optional"),
+                    _f("items", "Bullets", LINES, "", placeholder="one per line"),
+                ),
+            ),
+        ),
+    ),
+
     # ---------------------------------------------------------------- gantt
     DiagramSpec(
         key="gantt",

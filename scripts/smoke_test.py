@@ -55,6 +55,7 @@ KEYWORDS = {
     "er": "erDiagram",
     "usecase": "usecase-beta",
     "mindmap": "mindmap",
+    "layers": "flowchart",
     "gantt": "gantt",
     "timeline": "timeline",
     "pie": "pie",
@@ -270,6 +271,40 @@ def main() -> int:
     check(
         branch is not None and branch.section == "nodes" and branch.field == "label",
         f"a mindmap branch did not resolve: {branch}",
+    )
+
+    # a layer stack is built from two sections: the layer holds the heading, the
+    # column holds the bullets drawn under it
+    stack = sample("layers")
+    heading = stack.find_text("", "Infrastructure Services")
+    check(
+        heading == TextTarget("layers", 1, "title"),
+        f"a layer heading did not resolve to its row: {heading}",
+    )
+    column = stack.find_text("", "Compute Layer")
+    check(
+        column == TextTarget("columns", 1, "title"),
+        f"a column heading did not resolve to its row: {column}",
+    )
+    # mermaid draws the marker this app puts in front of every bullet
+    bullet = stack.find_text("", "• Thin Provisioning")
+    check(
+        bullet == TextTarget("columns", 3, "items", 4),
+        f"a bullet did not resolve to its own line: {bullet}",
+    )
+    stack_code = generate(stack).code
+    check(
+        stack_code.count("subgraph ") == 1,
+        f"the layers sample drew {stack_code.count('subgraph ')} panels, expected one",
+    )
+    check(
+        stack_code.count("-->") == len(stack.rows("layers")) - 1,
+        f"the stack is not chained end to end: {stack_code.count('-->')} connectors",
+    )
+    check("&amp;" in stack_code, "an ampersand was left raw in a label")
+    check(
+        "• " in stack_code and "<b>" in stack_code,
+        "a bullet or the heading lost its markup",
     )
     check(
         flowchart.find_text("", "nothing here draws this") is None,
@@ -656,6 +691,92 @@ def main() -> int:
         window._schedule_update(immediate=True)
         settle(SETTLE_MS)
         application.processEvents()
+
+        print("\nchecking that a double click on a bullet edits that bullet")
+        window.type_combo.setCurrentIndex(SPEC_ORDER.index("layers"))
+        application.processEvents()
+        settle(SETTLE_MS)
+        application.processEvents()
+
+        columns = window.document.rows("columns")
+        panel = next(
+            (i for i, row in enumerate(columns) if "Thin Provisioning" in row["items"]), None
+        )
+        check(panel is not None, "the layers sample has no bullet to click")
+        if panel is not None:
+            original = columns[panel]["items"]
+            # every bullet is an element of its own, so the page can say which
+            # one was clicked rather than handing back the whole panel
+            clicked = evaluate(
+                window,
+                "(() => {"
+                "  const box = document.querySelector('[id*=\"-Data_Services-\"]');"
+                "  if (!box) return 'no panel, the stage holds: '"
+                "    + Array.from(document.querySelectorAll('g[id]')).map(n => n.id)"
+                "      .slice(0, 4).join(' | ');"
+                "  const line = Array.from(box.querySelectorAll('div'))"
+                "    .find(d => d.textContent.trim() === '• Thin Provisioning');"
+                "  if (!line) return 'no bullet, the panel holds: '"
+                "    + Array.from(box.querySelectorAll('div'))"
+                "      .map(d => d.textContent.trim()).join(' / ');"
+                "  line.dispatchEvent(new MouseEvent('dblclick', {bubbles: true}));"
+                "  return line.textContent.trim();"
+                "})()",
+            )
+            check(
+                clicked == "• Thin Provisioning",
+                f"the panel does not draw the bullet on its own line: {clicked!r}",
+            )
+
+            held = evaluate(
+                window,
+                "(() => { const box = document.getElementById('label-editor');"
+                " return box ? [box.style.display, box.value] : null; })()",
+            )
+            check(
+                held == ["block", "Thin Provisioning"],
+                f"the editor did not open on the bullet alone: {held}",
+            )
+
+            selected = window.tree.currentItem()
+            group = selected.parent() if selected is not None else None
+            check(
+                group is not None and group.text(0).startswith("Columns"),
+                "the bullet's own row was not selected in the tree: "
+                f"{group.text(0) if group is not None else 'nothing'}",
+            )
+            check(
+                group is not None and group.indexOfChild(selected) == panel,
+                "the wrong column was selected for the bullet",
+            )
+
+            evaluate(
+                window,
+                "(() => { const box = document.getElementById('label-editor');"
+                "  box.value = 'Thin Provisioning v2';"
+                "  box.dispatchEvent("
+                "    new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));"
+                "  return true; })()",
+            )
+            settle(SETTLE_MS)
+            application.processEvents()
+            check(
+                columns[panel]["items"] == original.replace("Thin Provisioning", "Thin Provisioning v2"),
+                f"editing a bullet rewrote the field as {columns[panel]['items']!r}",
+            )
+            check(
+                "Thin Provisioning v2" in generate(window.document).code,
+                "the regenerated mermaid does not carry the new bullet",
+            )
+            check(
+                "Distributed Storage" in generate(window.document).code,
+                "editing one bullet disturbed the others",
+            )
+
+            columns[panel]["items"] = original
+            window._schedule_update(immediate=True)
+            settle(SETTLE_MS)
+            application.processEvents()
 
         print("\nchecking the SVG export, which reads the picture back out of the page")
         svg_path = Path(tempfile.gettempdir()) / "diagram-maker-smoke.svg"

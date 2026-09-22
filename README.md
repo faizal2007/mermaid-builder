@@ -5,7 +5,7 @@ A desktop tool for building diagrams visually — like Visio, but every diagram 
 generates the mermaid source, renders it live, and exports it as `.mmd`, `.html` or
 `.svg`.
 
-Twelve diagram types, all rendered by Mermaid 12.
+Thirteen diagram types, all rendered by Mermaid 12.
 
 ## Requirements
 
@@ -51,6 +51,7 @@ uv run python -m diagram_maker
 | Entity relationship | `er` | Entities, columns, cardinality |
 | Use case | `usecase` | Actors, use cases, system boundaries, include/extend |
 | Mindmap | `mindmap` | Indented tree (level 1 is the root) |
+| Layer stack | `layers` | Panels of bullet points, one layer above the next |
 | Gantt | `gantt` | Sections, tasks, dependencies, milestones |
 | Timeline | `timeline` | Sections and dated events |
 | Pie chart | `pie` | Slices with values |
@@ -60,6 +61,11 @@ uv run python -m diagram_maker
 
 Every type shares the same options: a title, a mermaid theme and a
 `classic` / `neo` / `handDrawn` look.
+
+A layer stack is a flowchart underneath, so a layer with one column is a single
+box and a layer with two or more becomes a panel with the columns side by side.
+Its layers are listed in the order they stack and its columns name the layer they
+belong to, which is what says where each one is drawn.
 
 Two of them have their own ideas about text. An architecture diagram has no title
 of its own, so mermaid ignores the one the title option writes into the source
@@ -240,6 +246,10 @@ signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "dist\Diag
   rasterised per size. Run it with `--preview build/icon-preview.png` to look at
   the result before shipping it. The window loads that file at run time, which
   is what the taskbar draws, and the build embeds the same file in the `.exe`.
+- A layer stack writes its label width into the frontmatter as
+  `flowchart.wrappingWidth`. Mermaid sizes a box from the text it can measure,
+  not from the HTML it goes on to draw, so without that a bullet line is wrapped
+  in the middle even when the panel has room for it.
 - The window icon alone is not enough on Windows: the taskbar takes a button's
   identity from the process's AppUserModelID, and an unset one is inherited from
   the executable, so a run from source would show Python's icon. `main()` claims

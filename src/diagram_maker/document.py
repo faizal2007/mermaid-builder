@@ -625,6 +625,51 @@ def _architecture() -> DiagramDocument:
     return doc
 
 
+def _layers() -> DiagramDocument:
+    doc = DiagramDocument.blank("layers")
+    doc.options["direction"] = "TD"
+    doc.sections["layers"] = _rows(
+        ("title", "HCI Management Portal"),
+        ("title", "Infrastructure Services"),
+        ("title", "Data Services"),
+        ("title", "Business Continuity"),
+        ("title", "Government Applications"),
+    )
+    doc.sections["columns"] = _rows(
+        (
+            "layer", "HCI Management Portal",
+            "items", "Single-Pane Administration\nMonitoring & Analytics\nCapacity Management\n"
+            "Role-Based Access Control (RBAC)\nAudit & Compliance Reporting",
+        ),
+        # two columns under one layer make it a panel with them side by side
+        (
+            "layer", "Infrastructure Services", "title", "Compute Layer",
+            "items", "KVM\nHA Clustering\nLive Migration\nVM Templates\nResource Pool",
+        ),
+        (
+            "layer", "Infrastructure Services", "title", "Networking Services",
+            "items", "Virtual Networks\nVLAN-Aware Networking\nDHCP Services\n"
+            "Security Policies\nMulti-Site Connectivity",
+        ),
+        (
+            "layer", "Data Services",
+            "items", "Distributed Storage\nData Replication\nSnapshots\n"
+            "Storage Pool Management\nThin Provisioning\nStorage Monitoring",
+        ),
+        (
+            "layer", "Business Continuity",
+            "items", "Automated Backup\nDisaster Recovery\nSite-to-Site Replication\n"
+            "VM Recovery\nFailover & Failback\nRecovery Orchestration",
+        ),
+        (
+            "layer", "Government Applications",
+            "items", "e-Government Portal\nFinance Systems\nHuman Resource Systems\n"
+            "GIS Platforms\nDocument Management Systems\nDatabase & Analytics Workloads",
+        ),
+    )
+    return doc
+
+
 _SAMPLES = {
     "flowchart": _flowchart,
     "sequence": _sequence,
@@ -632,6 +677,7 @@ _SAMPLES = {
     "er": _er,
     "usecase": _usecase,
     "mindmap": _mindmap,
+    "layers": _layers,
     "gantt": _gantt,
     "timeline": _timeline,
     "pie": _pie,
