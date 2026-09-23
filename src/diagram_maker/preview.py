@@ -304,6 +304,29 @@ stage.addEventListener('dblclick', function (event) {
 
 window.__svg = '';
 
+// Mermaid hands the diagram back as a string that has been through the HTML
+// serialiser, and that is not XML: the <br> it draws for a wrapped label, or
+// the <hr> a layer stack puts under a title, comes back unclosed, and an XML
+// parser reads an unclosed <hr> as a tag still looking for its </hr>.  A file
+// like that draws in a browser and nowhere that reads SVG as XML, which is
+// most of what a .svg is opened with.  Serialising the element that is on
+// screen instead writes those as <br /> and adds the namespaces the file needs,
+// and the picture itself is not touched.  If that ever fails the raw string is
+// handed over anyway - it is a picture that opens in a browser, which beats no
+// export at all.
+window.svgFile = function () {
+  const drawn = stage.querySelector('svg');
+  if (!drawn) return '';
+  try {
+    const xml = new XMLSerializer().serializeToString(drawn);
+    const parsed = new DOMParser().parseFromString(xml, 'image/svg+xml');
+    if (parsed.querySelector('parsererror')) return window.__svg;
+    return '<?xml version="1.0" encoding="UTF-8"?>\\n' + xml + '\\n';
+  } catch (err) {
+    return window.__svg;
+  }
+};
+
 if (typeof mermaid === 'undefined' || window.__cdnFailed) {
   showBanner('error', 'Could not load mermaid from the CDN.\\n\\n' + '%(cdn)s' + '\\n\\nThe editor still works and exports are unaffected - only the preview needs a network connection.');
   setTitle('offline');
@@ -551,12 +574,18 @@ class PreviewPane(QWidget):
         self._view.page().runJavaScript(f"window.showLabelEditor({json.dumps(text)});")
 
     def svg(self, callback) -> None:
-        """Hand the last rendered SVG to ``callback`` (called on the GUI thread)."""
+        """Hand the last rendered SVG to ``callback`` (called on the GUI thread).
+
+        What comes back is a whole XML document, ready to be written to a
+        ``.svg`` file.  Mermaid's own string is HTML - void elements such as
+        ``<br>`` are left unclosed - so it is serialised again from the drawn
+        element, and this is empty when nothing has been drawn.
+        """
 
         def receive(value: object) -> None:
             callback(value if isinstance(value, str) else "")
 
-        self.evaluate("window.__svg || '';", receive)
+        self.evaluate("window.svgFile();", receive)
 
     def save_svg(self, path: str | Path, callback=None) -> None:
         """Write the rendered SVG to ``path`` once the page hands it over."""

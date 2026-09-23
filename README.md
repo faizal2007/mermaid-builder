@@ -264,3 +264,11 @@ signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "dist\Diag
   the executable, so a run from source would show Python's icon. `main()` claims
   `APP_ID` before anything else, and the installer writes the same string onto
   the shortcuts it creates. Keep the two in step.
+- The SVG export is written as XML, not as the string mermaid hands back. That
+  string has been through the HTML serialiser, so a void element inside a label
+  comes back unclosed - the `<br>` mermaid draws for a use case, the `<hr>` a
+  layer stack puts under a title - and a reader that insists on XML, which is
+  most of what opens a `.svg`, refuses the whole file over one of them.
+  `window.svgFile()` in `preview.py` serialises the element that is on screen
+  instead, which closes those and declares the namespaces; `smoke_test.py`
+  parses the export back with `ElementTree` to keep it that way.

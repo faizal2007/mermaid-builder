@@ -16,6 +16,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from xml.etree import ElementTree
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault(
@@ -837,6 +838,22 @@ def main() -> int:
         markup = svg_path.read_text(encoding="utf-8") if svg_path.is_file() else ""
         check("<svg" in markup, "the exported SVG contains no <svg> element")
         check(len(markup) > 500, "the exported SVG looks empty")
+
+        # mermaid draws this sample with an <hr/> under every title, and its own
+        # string leaves those unclosed, so a reader that wants XML - which is
+        # most of what a .svg is opened with - refuses the file outright
+        try:
+            root = ElementTree.fromstring(markup)
+            xml_problem = ""
+        except ElementTree.ParseError as error:
+            root = None
+            xml_problem = str(error)
+        check(not xml_problem, f"the exported SVG is not well-formed XML: {xml_problem}")
+        check(
+            root is not None and root.tag == "{http://www.w3.org/2000/svg}svg",
+            "the exported file has no svg element of its own: "
+            f"{root.tag if root is not None else 'nothing parsed'}",
+        )
 
         print("checking that an invalid diagram is reported instead of failing silently")
         renders.clear()
