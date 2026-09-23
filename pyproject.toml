@@ -1,6 +1,6 @@
 [project]
 name = "diagram-maker"
-version = "0.2.0"
+version = "0.2.1"
 description = "Build diagrams visually and export them as mermaid"
 readme = "README.md"
 authors = [
