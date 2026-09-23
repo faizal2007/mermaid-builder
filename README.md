@@ -62,10 +62,12 @@ uv run python -m diagram_maker
 Every type shares the same options: a title, a mermaid theme and a
 `classic` / `neo` / `handDrawn` look.
 
-A layer stack is a flowchart underneath, so a layer with one column is a single
-box and a layer with two or more becomes a panel with the columns side by side.
-Its layers are listed in the order they stack and its columns name the layer they
-belong to, which is what says where each one is drawn.
+A layer stack is a flowchart underneath. Its layers are listed in the order they
+stack, and its columns name the layer they belong to, which is what says where
+each one is drawn: a column with a title of its own is a box, and a layer with
+two or more of them becomes a panel with those boxes side by side. Give a layer a
+heading and every layer that shares it, one after another, is drawn inside one
+panel named by that heading.
 
 Two of them have their own ideas about text. An architecture diagram has no title
 of its own, so mermaid ignores the one the title option writes into the source
@@ -179,7 +181,9 @@ diagram types, which the docs describe before most people have used them.
 `edge_check.py` does the same for awkward-but-plausible input: colons in task
 names, spaces in entity names, quotes inside labels, braces inside columns. Every
 case there failed at least once during development, so it is the regression net
-for the generators.
+for the generators. Each case is on an eight-second clock, because mermaid's
+layout occasionally spends tens of seconds on a diagram it can draw perfectly
+well; `#results` lists the time every case took, and flags the slow ones.
 
 ## Windows installer
 
@@ -218,8 +222,11 @@ Inno Setup is the only outside tool needed. `winget install -e --id JRSoftware.I
 installs it; without it the build stops after the portable zip and says so.
 
 The bundles are unsigned, so SmartScreen warns before the installer runs and
-Smart App Control refuses to run it at all. Sign the frozen app first if you
-have a certificate, so the payload carries its signature too:
+Smart App Control refuses to run it at all. It can also refuse the build's own
+checks, which start the frozen application as soon as it is written: the build
+says which check Windows declined, skips the rest, and still compiles the
+installer. Sign the frozen app first if you have a certificate, so the payload
+carries its signature too:
 
 ```powershell
 signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "dist\Diagram Maker\Diagram Maker.exe"
@@ -249,7 +256,9 @@ signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "dist\Diag
 - A layer stack writes its label width into the frontmatter as
   `flowchart.wrappingWidth`. Mermaid sizes a box from the text it can measure,
   not from the HTML it goes on to draw, so without that a bullet line is wrapped
-  in the middle even when the panel has room for it.
+  in the middle even when the panel has room for it. The option's floor is 300
+  rather than mermaid's own 200: once it decides these lines have to be broken,
+  a layout that takes two seconds starts taking a minute.
 - The window icon alone is not enough on Windows: the taskbar takes a button's
   identity from the process's AppUserModelID, and an unset one is inherited from
   the executable, so a run from source would show Python's icon. `main()` claims

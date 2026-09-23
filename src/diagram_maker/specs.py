@@ -621,10 +621,12 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
                 "Label width",
                 INT,
                 400,
-                minimum=150,
+                minimum=300,
                 maximum=1500,
                 step=50,
-                tip="How wide a bullet line gets before mermaid wraps it.",
+                tip="How wide a bullet line gets before mermaid wraps it. Narrow "
+                "widths make mermaid's layout crawl, so the floor is well above "
+                "its own default of 200.",
             ),
         ),
         sections=(
@@ -632,10 +634,19 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
                 key="layers",
                 label="Layers",
                 singular="Layer",
-                summary=("title",),
+                summary=("heading", "title"),
                 text_field="title",
                 tip="One panel per layer, stacked in the order they are listed.",
                 fields=(
+                    _f(
+                        "heading",
+                        "Heading",
+                        TEXT,
+                        "",
+                        placeholder="optional group",
+                        tip="Layers with the same heading, one after another, are "
+                        "drawn inside one panel named by it.",
+                    ),
                     _f("title", "Title", TEXT, "", placeholder="Data Services"),
                 ),
             ),
@@ -657,7 +668,7 @@ _RAW_SPECS: Sequence[DiagramSpec] = (
                         tip="The title of a layer listed above, so renaming that "
                         "layer means renaming it here too.",
                     ),
-                    _f("title", "Heading", TEXT, "", placeholder="optional"),
+                    _f("title", "Title", TEXT, "", placeholder="optional"),
                     _f("items", "Bullets", LINES, "", placeholder="one per line"),
                 ),
             ),

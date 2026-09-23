@@ -48,6 +48,24 @@ DEFINES = WORK / "installer_defines.iss"
 #: how long the frozen app has to survive before we call it healthy
 GRACE_SECONDS = 12.0
 
+#: what Windows reports when an application control policy blocks a program
+BLOCKED = 4551
+
+
+class BlockedByPolicy(RuntimeError):
+    """Windows would not start a program this build wrote.
+
+    Smart App Control refuses an executable it has not seen before, and every
+    build writes a new one, so this is the machine's policy rather than a fault
+    in the application.  The checks step aside and the installer is still made.
+    """
+
+
+def refused(error: OSError) -> bool:
+    """Whether Windows refused to start the file, rather than the file failing."""
+    return getattr(error, "winerror", None) == BLOCKED or "Application Control" in str(error)
+
+
 INNO_HINT = (
     "Inno Setup 6 was not found, so only the portable build was produced.\n"
     "    winget install -e --id JRSoftware.InnoSetup\n"
@@ -107,7 +125,16 @@ def say(message: str) -> None:
 def run(command: list[str], **keywords) -> subprocess.CompletedProcess:
     """Run a build step, letting its output through to the terminal."""
     keywords.setdefault("check", False)
-    return subprocess.run(command, cwd=ROOT, **keywords)
+    try:
+        return subprocess.run(command, cwd=ROOT, **keywords)
+    except OSError as error:
+        if refused(error):
+            raise BuildError(
+                f"Windows refused to start {command[0]}: {error}\n"
+                "an application control policy is blocking it; see the notes in "
+                "the README about signing the build"
+            ) from error
+        raise
 
 
 # ------------------------------------------------------------- preparation #
@@ -219,13 +246,18 @@ def export_check(bundle: Path) -> str | None:
     """The same .exe is a CLI, so make it write a diagram without a window."""
     target = WORK / "frozen-export.mmd"
     target.unlink(missing_ok=True)
-    result = subprocess.run(
-        [str(bundle / APP_EXE), "--export", str(target)],
-        cwd=bundle,
-        capture_output=True,
-        timeout=120,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            [str(bundle / APP_EXE), "--export", str(target)],
+            cwd=bundle,
+            capture_output=True,
+            timeout=120,
+            check=False,
+        )
+    except OSError as error:
+        if refused(error):
+            raise BlockedByPolicy(str(error)) from error
+        raise
     if result.returncode != 0:
         return f"--export exited with code {result.returncode}"
     if not target.is_file() or target.stat().st_size == 0:
@@ -240,7 +272,12 @@ def launch_check(bundle: Path) -> str | None:
         "QTWEBENGINE_CHROMIUM_FLAGS": "--no-sandbox --disable-gpu",
         "QT_LOGGING_RULES": "qt.webenginecontext.debug=false",
     }
-    process = subprocess.Popen([str(bundle / APP_EXE)], cwd=bundle, env=environment)
+    try:
+        process = subprocess.Popen([str(bundle / APP_EXE)], cwd=bundle, env=environment)
+    except OSError as error:
+        if refused(error):
+            raise BlockedByPolicy(str(error)) from error
+        raise
     try:
         code = process.wait(timeout=GRACE_SECONDS)
     except subprocess.TimeoutExpired:
@@ -357,6 +394,7 @@ def main(argv: list[str] | None = None) -> int:
 
     info = metadata()
     say(f"Diagram Maker {info['version']}")
+    checks_skipped = arguments.no_run
     try:
         ensure_icon(arguments.icon)
         resource = write_version_resource(info)
@@ -380,15 +418,24 @@ def main(argv: list[str] | None = None) -> int:
         if arguments.no_run:
             say("checks     offscreen launch and headless export skipped")
         else:
-            if reason := export_check(bundle):
-                raise BuildError(f"the frozen application cannot export: {reason}")
-            say("cli        --export wrote a diagram")
-            if reason := launch_check(bundle):
-                raise BuildError(
-                    f"the frozen application did not stay up: {reason}\n"
-                    "rebuild with --console to see what it printed"
-                )
-            say(f"launch     still running after {GRACE_SECONDS:g}s offscreen")
+            try:
+                if reason := export_check(bundle):
+                    raise BuildError(f"the frozen application cannot export: {reason}")
+                say("cli        --export wrote a diagram")
+                if reason := launch_check(bundle):
+                    raise BuildError(
+                        f"the frozen application did not stay up: {reason}\n"
+                        "rebuild with --console to see what it printed"
+                    )
+                say(f"launch     still running after {GRACE_SECONDS:g}s offscreen")
+            except BlockedByPolicy as refusal:
+                # an application control policy is not something the build can
+                # fix, and the installer is still worth having
+                say(f"checks     Windows refused to start the app: {refusal}")
+                say("           Smart App Control blocks programs it has not seen")
+                say("           before, and every build writes a new one. Sign the")
+                say("           binaries, or run the checks where it allows them.")
+                checks_skipped = True
 
         setup = make_installer(info, bundle)
         if setup is None:
@@ -398,6 +445,8 @@ def main(argv: list[str] | None = None) -> int:
             say(f"installer  {setup}  ({setup.stat().st_size / 1_048_576:.1f} MB)")
             if arguments.zip:
                 say(f"portable   {make_zip(info)}")
+        if checks_skipped:
+            say("note       the build was not started here, so it is unverified")
     except BuildError as error:
         say(f"error: {error}")
         return 1

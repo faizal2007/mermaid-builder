@@ -44,29 +44,47 @@ PAGE = """<!doctype html>
 <script src="{cdn}"></script>
 <script>
 const cases = {payload};
+// A handful of diagrams send mermaid's layout into a long spin - a layer stack
+// that runs left to right took twenty seconds, and one case never answered at
+// all - so each render is on the clock.  Without this the page simply stops
+// partway through and looks like a broken case rather than a slow one.
+const LIMIT_MS = 8000;
 mermaid.initialize({{ startOnLoad: false }});
 (async () => {{
   const results = [];
-  for (let i = 0; i < cases.length; i++) {{
-    const c = cases[i];
-    try {{
-      await mermaid.render('edge-' + i, c.code);
-      results.push({{ name: c.name, ok: true }});
-    }} catch (err) {{
-      results.push({{ name: c.name, ok: false, error: String(err && err.message || err) }});
-    }}
-    // mermaid appends its error graphic to the body and leaves it there
-    for (const node of Array.from(document.body.children)) {{
-      if (node.tagName !== 'SCRIPT' && node.id !== 'results') node.remove();
-    }}
-  }}
-  window.__results = results;
+  // the page says what it has done as it goes: mermaid's layout can block the
+  // thread for a minute on one case, and a page that only reports at the end
+  // looks simply broken while that happens
   const pre = document.createElement('pre');
   pre.id = 'results';
-  pre.textContent = results.map(r => (r.ok ? 'ok   ' : 'FAIL ') + r.name + (r.ok ? '' : '  <- ' + r.error)).join('\\n');
-  if (results.every(r => r.ok)) pre.className = 'ok';
   document.body.appendChild(pre);
-  document.title = results.every(r => r.ok) ? 'ALL OK' : 'FAILURES';
+  const flag = r => (r.ok ? (r.slow ? 'SLOW ' : 'ok   ') : 'FAIL ');
+  const line = r => flag(r) + String(r.seconds).padStart(6) + 's  ' + r.name + (r.ok ? '' : '  <- ' + r.error);
+  for (let i = 0; i < cases.length; i++) {{
+    const c = cases[i];
+    const started = Date.now();
+    try {{
+      const outcome = await Promise.race([
+        mermaid.render('edge-' + i, c.code).then(() => 'ok'),
+        new Promise(res => setTimeout(() => res('slow'), LIMIT_MS))
+      ]);
+      const seconds = Math.round((Date.now() - started) / 100) / 10;
+      results.push({{ name: c.name, ok: true, slow: outcome === 'slow', seconds: seconds }});
+    }} catch (err) {{
+      results.push({{ name: c.name, ok: false, error: String(err && err.message || err) }});
+      // a failed render leaves mermaid's own error graphic on the body, and it
+      // would sit there for every case that follows
+      for (const node of Array.from(document.body.children)) {{
+        if (node.tagName !== 'SCRIPT' && node !== pre) node.remove();
+      }}
+    }}
+    pre.textContent += line(results[results.length - 1]) + '\\n';
+  }}
+  window.__results = results;
+  if (results.every(r => r.ok)) pre.className = 'ok';
+  const blown = results.filter(r => !r.ok).length;
+  const slow = results.filter(r => r.slow).length;
+  document.title = blown ? 'FAILURES' : (slow ? 'ALL OK, ' + slow + ' SLOW' : 'ALL OK');
 }})();
 </script>
 </body>
@@ -105,6 +123,15 @@ def fielded(kind: str, group: str, index: int, fields: dict[str, Any]) -> Diagra
     """
     doc = sample(kind)
     doc.sections[group][index].update(fields)
+    return doc
+
+
+def group_of(kind: str, heading: str, *indexes: int, **options: Any) -> DiagramDocument:
+    """A sample whose numbered rows share a heading, and options of its own."""
+    doc = sample(kind)
+    for index in indexes:
+        doc.sections["layers"][index]["heading"] = heading
+    doc.options.update(options)
     return doc
 
 
@@ -267,6 +294,21 @@ CASES: list[tuple[str, Callable[[], DiagramDocument]]] = [
      lambda: with_options("layers", direction="LR")),
     ("layers: a label width of zero",
      lambda: with_options("layers", width=0)),
+    # a heading wraps the layers that carry it, one after another, in a panel
+    ("layers: two layers sharing a heading",
+     lambda: group_of("layers", "Platform", 1, 2)),
+    ("layers: a heading on one layer alone",
+     lambda: group_of("layers", "Platform", 1)),
+    ("layers: a heading that comes back further down",
+     lambda: group_of("layers", "Platform", 1, 3)),
+    ("layers: a grouped layer that is split into columns",
+     lambda: group_of("layers", "Platform", 1, 2, 3)),
+    ("layers: a heading with quotes and brackets",
+     lambda: group_of("layers", 'Ops "night" [core]', 1, 2)),
+    ("layers: a heading over a stack that runs left to right",
+     lambda: group_of("layers", "Platform", 1, 2, 3, direction="LR")),
+    ("layers: a heading on every layer",
+     lambda: group_of("layers", "Platform", 0, 1, 2, 3, 4)),
 ]
 
 

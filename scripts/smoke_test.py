@@ -306,6 +306,53 @@ def main() -> int:
         "• " in stack_code and "<b>" in stack_code,
         "a bullet or the heading lost its markup",
     )
+
+    # a heading collects the layers that carry it into one panel
+    grouped = sample("layers")
+    grouped.rows("layers")[1]["heading"] = "Platform"
+    grouped.rows("layers")[2]["heading"] = "Platform"
+    grouped_code = generate(grouped).code
+    check(
+        'subgraph sg_Platform["Platform"]' in grouped_code,
+        f"a heading did not become a panel: {grouped_code}",
+    )
+    if 'subgraph sg_Platform["Platform"]' in grouped_code:
+        panel = grouped_code[grouped_code.index("sg_Platform") :]
+        panel = panel[: panel.index("\n    end")]
+        check(
+            "sg_Infrastructure_Services" in panel and "Data_Services[" in panel,
+            f"the layers that share a heading were not drawn inside it: {panel}",
+        )
+        # a panel inside a panel must not state a direction of its own, or
+        # mermaid lays the nested one out by a rule of its own choosing
+        check(
+            panel.count("direction ") == 1,
+            f"the nested panel stated its own direction: {panel}",
+        )
+    # two layers in one panel are one step of the stack, not two
+    check(
+        grouped_code.count("-->") == 3,
+        f"the grouped stack has {grouped_code.count('-->')} connectors, expected three",
+    )
+
+    # a layer with nothing in it is dropped before the panels are worked out,
+    # so that it cannot cut a panel in two
+    holed = sample("layers")
+    for row in (1, 2, 3):
+        holed.rows("layers")[row]["heading"] = "Platform"
+    holed.rows("columns")[:] = [
+        column for column in holed.rows("columns") if column["layer"] != "Data Services"
+    ]
+    holed_code = generate(holed).code
+    check(
+        holed_code.count("sg_Platform") == 1,
+        f"an empty layer cut the panel in two: {holed_code.count('sg_Platform')} panels",
+    )
+    check(
+        holed_code.count("-->") == 2,
+        f"the stack around the empty layer has {holed_code.count('-->')} connectors, "
+        "expected two",
+    )
     check(
         flowchart.find_text("", "nothing here draws this") is None,
         "text that is not in the diagram resolved to an element",

@@ -779,7 +779,8 @@ def _label(title: str, heading: str, items: Sequence[str]) -> str:
     if title:
         parts.append(f"<b>{_html(title)}</b>")
     if heading:
-        parts.append(f"<i>{_html(heading)}</i>")
+        # on a line of its own: a heading set against the title reads as one word
+        parts.append(f"<br/><i>{_html(heading)}</i>")
     if items:
         if parts:
             parts.append("<hr/>")
@@ -800,24 +801,64 @@ def _unique(name: str, used: set[str]) -> str:
     return numbered
 
 
+def _layer_box(
+    layer: dict[str, Any],
+    columns: list[tuple[str, list[str]]],
+    pad: str,
+    used: set[str],
+    across: str | None,
+) -> tuple[list[str], str, str]:
+    """One layer as a box, or as a panel holding a box per column.
+
+    Returns the lines to write, and the ids of the first and last box in it.
+    """
+    base = ident(layer["title"], f"L{layer['number']}")
+    if len(columns) == 1:
+        # one column is the layer itself, so the column's title is its subtitle
+        heading, items = columns[0]
+        node = _unique(base, used)
+        return [f'{pad}{node}["{_label(layer["title"], heading, items)}"]'], node, node
+
+    lines = [f'{pad}subgraph {_unique(f"sg_{base}", used)}["{_html(layer["title"])}"]']
+    if across:
+        lines.append(f"{pad}    direction {across}")
+    nodes: list[str] = []
+    for position, (heading, items) in enumerate(columns):
+        node = _unique(ident(heading, f"{base}_{position + 1}"), used)
+        nodes.append(node)
+        lines.append(f'{pad}    {node}["{_label(heading, "", items)}"]')
+    lines.append(f"{pad}end")
+    return lines, nodes[0], nodes[-1]
+
+
 def _layers(doc: DiagramDocument, warn: Callable[[str, int, str], None]) -> str:
     direction = clean(doc.option("direction")) or "TD"
     out = [f"flowchart {direction}"]
-    # a panel lays its columns out across the flow, not along it
+    # a panel lays what it holds out across the flow, not along it
     across = "LR" if direction.upper() in ("TB", "TD", "BT") else "TB"
 
     # the layers are declared in the order they stack; a column names the layer
     # it belongs to, so the two sections together say what the diagram holds
-    panels: list[dict[str, Any]] = []
+    layers: list[dict[str, Any]] = []
+    held: list[list[tuple[int, dict[str, Any]]]] = []
     index_of: dict[str, int] = {}
-    for index, layer in enumerate(doc.rows("layers")):
-        title = clean(layer.get("title"))
+
+    def place(title: str, heading: str, row: int) -> int:
+        """Add a layer at the end of the stack, and return where it landed."""
+        layers.append(
+            {"title": title, "heading": heading, "row": row, "number": len(layers) + 1}
+        )
+        held.append([])
+        return len(layers) - 1
+
+    for index, row in enumerate(doc.rows("layers")):
+        title = clean(row.get("title"))
         if not title:
             warn("layers", index, "skipped, no title")
             continue
         # a repeated title names the first of them, and both are drawn
-        index_of.setdefault(title, len(panels))
-        panels.append({"title": title, "row": index, "columns": []})
+        if title not in index_of:
+            index_of[title] = place(title, clean(row.get("heading")), index)
 
     for index, column in enumerate(doc.rows("columns")):
         owner = clean(column.get("layer"))
@@ -829,48 +870,62 @@ def _layers(doc: DiagramDocument, warn: Callable[[str, int, str], None]) -> str:
                 index,
                 f"layer {owner!r} is not declared, drawn as a panel of its own",
             )
-            where = len(panels)
+            where = place(owner or f"Column {index + 1}", "", -1)
             index_of[owner] = where
-            panels.append({"title": owner or f"Column {index + 1}", "row": -1, "columns": []})
-        panels[where]["columns"].append((index, column))
+        held[where].append((index, column))
+
+    # a layer with nothing in it is dropped before the grouping, so that it
+    # cannot cut a panel in two
+    filled: list[tuple[dict[str, Any], list[tuple[str, list[str]]]]] = []
+    for layer, columns in zip(layers, held):
+        drawn: list[tuple[str, list[str]]] = []
+        for index, column in columns:
+            title = clean(column.get("title"))
+            items = lines(column.get("items"))
+            if not title and not items:
+                warn("columns", index, "skipped, neither a title nor any bullets")
+                continue
+            drawn.append((title, items))
+        if not drawn:
+            if layer["row"] >= 0:
+                warn("layers", layer["row"], f"'{layer['title']}' skipped, it has no columns")
+            continue
+        filled.append((layer, drawn))
+
+    # layers with the same heading, one after another, are drawn as one panel
+    runs: list[tuple[str, list[tuple[dict[str, Any], list[tuple[str, list[str]]]]]]] = []
+    for entry in filled:
+        heading = entry[0]["heading"]
+        if runs and heading and runs[-1][0] == heading:
+            runs[-1][1].append(entry)
+        else:
+            runs.append((heading, [entry]))
 
     used: set[str] = set()
     ends: list[tuple[str, str]] = []
-    for number, panel in enumerate(panels):
-        title = panel["title"]
-        columns: list[tuple[int, str, str, list[str]]] = []
-        for index, column in panel["columns"]:
-            heading = clean(column.get("title"))
-            items = lines(column.get("items"))
-            if not heading and not items:
-                warn("columns", index, "skipped, neither a heading nor any bullets")
-                continue
-            columns.append((index, heading, _label(heading, "", items), items))
-        if not columns:
-            if panel["row"] >= 0:
-                warn("layers", panel["row"], f"'{title}' skipped, it has no columns")
-            continue
-
-        base = ident(title, f"L{number + 1}")
-        if len(columns) == 1:
-            # one column is the layer itself: its title is the heading
-            _, heading, _, items = columns[0]
-            node = _unique(base, used)
-            out.append(f'    {node}["{_label(title, heading, items)}"]')
-            ends.append((node, node))
-            continue
-
-        group = _unique(f"sg_{base}", used)
-        out.append(f'    subgraph {group}["{_html(title)}"]')
-        out.append(f"        direction {across}")
-        nodes: list[str] = []
-        for position, (_, heading, label, _) in enumerate(columns):
-            # a column without a heading is named by its layer and its place
-            node = _unique(ident(heading, f"{base}_{position + 1}"), used)
-            nodes.append(node)
-            out.append(f'        {node}["{label}"]')
-        out.append("    end")
-        ends.append((nodes[0], nodes[-1]))
+    for heading, run in runs:
+        pad = "    "
+        # a panel inside a panel must not state its own direction: mermaid lays
+        # nested subgraphs out by the outer one, and two directions in play is
+        # where its layout stops following what was asked
+        nested = False
+        if heading:
+            group = _unique(f"sg_{ident(heading, 'group')}", used)
+            out.append(f'    subgraph {group}["{_html(heading)}"]')
+            out.append(f"        direction {across}")
+            pad = "        "
+            nested = True
+        first = last = ""
+        for layer, columns in run:
+            lines_, first_id, last_id = _layer_box(
+                layer, columns, pad, used, None if nested else across
+            )
+            out.extend(lines_)
+            first = first or first_id
+            last = last_id
+        if heading:
+            out.append("    end")
+        ends.append((first, last))
 
     if len(ends) > 1:
         out.append("")
