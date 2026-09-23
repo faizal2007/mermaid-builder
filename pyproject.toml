@@ -3,6 +3,8 @@ name = "diagram-maker"
 version = "0.2.1"
 description = "Build diagrams visually and export them as mermaid"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
   { name = "Faizal Sadri", email = "faizal@geekdo.me" }
 ]

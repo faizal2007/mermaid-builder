@@ -982,7 +982,8 @@ class MainWindow(QMainWindow):
             f"<p>{len(SPEC_ORDER)} diagram types, rendered by mermaid "
             f"{MERMAID_VERSION}.</p>"
             "<p>The preview loads mermaid from jsdelivr, so it needs a network "
-            "connection. Exports never do.</p>",
+            "connection. Exports never do.</p>"
+            "<p>Released under the MIT licence.</p>",
         )
 
     # ------------------------------------------------------------- overrides #

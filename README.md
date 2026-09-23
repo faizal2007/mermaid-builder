@@ -272,3 +272,11 @@ signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "dist\Diag
   `window.svgFile()` in `preview.py` serialises the element that is on screen
   instead, which closes those and declares the namespaces; `smoke_test.py`
   parses the export back with `ElementTree` to keep it that way.
+
+## Licence
+
+MIT, © 2026 Faizal Sadri - see [LICENSE](LICENSE).
+
+Mermaid, which draws every diagram, is MIT licensed too. It is fetched from
+jsdelivr when the preview loads rather than bundled, so the application and its
+installer ship no third-party code.
