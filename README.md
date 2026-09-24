@@ -221,6 +221,50 @@ What the installer sets up:
 Inno Setup is the only outside tool needed. `winget install -e --id JRSoftware.InnoSetup`
 installs it; without it the build stops after the portable zip and says so.
 
+### Install modes
+
+Run by hand, the installer asks who it is for on the first page: per-user into
+`%LOCALAPPDATA%\Programs\Diagram Maker` with no administrator, or for all users
+from an elevated Program Files. For a script or a machine image the same choice
+is a switch:
+
+```powershell
+# nothing on screen, per-user
+DiagramMaker-0.2.1-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CURRENTUSER
+
+# ... and machine-wide, from an elevated prompt
+DiagramMaker-0.2.1-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /ALLUSERS
+
+# somewhere else, with the optional extras, leaving a log behind
+DiagramMaker-0.2.1-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /DIR="D:\Apps\Diagram Maker" `
+  /MERGETASKS="desktopicon,association" /LOG="$env:TEMP\diagram-maker-install.log"
+```
+
+- `/SILENT` hides the wizard but keeps the progress window; `/VERYSILENT` shows
+  nothing at all. Errors still appear unless `/SUPPRESSMSGBOXES` is passed
+  alongside one of the two.
+- `/SP-` matters even when nothing is drawn: without it the "This will
+  install..." prompt still comes up, because the script leaves
+  `DisableStartupPrompt` off.
+- `/ALLUSERS` and `/CURRENTUSER` are accepted because
+  `PrivilegesRequiredOverridesAllowed=dialog` already implies `commandline`.
+  Pass neither and an unattended run follows `PrivilegesRequired=lowest`, so it
+  installs per-user.
+- Both tasks are unticked by default, so an unattended run gets neither the
+  desktop shortcut nor the `.diagram.json` association unless `/MERGETASKS`
+  (add to the defaults) or `/TASKS` (replace them) asks for it.
+- `/NORESTART` is worth passing: very silent plus a required restart reboots
+  without asking.
+
+Uninstalling works the same way, with `unins000.exe` from the install folder:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\Diagram Maker\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+```
+
+None of this applies to the portable zip, which has no installer to pass
+switches to.
+
 The bundles are unsigned, so SmartScreen warns before the installer runs and
 Smart App Control refuses to run it at all. It can also refuse the build's own
 checks, which start the frozen application as soon as it is written: the build
